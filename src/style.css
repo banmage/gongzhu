@@ -1,0 +1,189 @@
+/* 花色符号 Web 字体：草花与黑桃的连接处更细，避免两者在小字号下混淆。
+   字形取自 Gyula Zsigri 的 Cards 字体（https://www.pagat.com/com/cardsttf.html），
+   原始授权允许自由使用与分发；完整说明见 src/assets/fonts/LICENSE.txt。 */
+@font-face {
+  font-family: 'Bridge Suit Symbols';
+  src: url('./assets/fonts/bridge-suits.ttf') format('truetype');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+:root {
+  --felt: #1f6b45;
+  --felt-dark: #14563a;
+  --ink: #1c2b22;
+  --paper: #f7f7f2;
+  --gold: #ffd666;
+  --gold-soft: #ffe19a;
+  --danger: #ff8a7a;
+  --suit-font: 'Bridge Suit Symbols', 'Noto Sans Symbols 2', 'Segoe UI Symbol', 'Apple Symbols',
+    'Arial Unicode MS', 'DejaVu Sans', sans-serif;
+  --club-ink: #172b63;
+  font-family: 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', system-ui, sans-serif;
+}
+
+.suit-symbol {
+  font-family: var(--suit-font);
+  font-variant-emoji: text;
+  font-style: normal;
+  font-synthesis: none;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background:
+    radial-gradient(circle at 50% 0%, rgba(46, 137, 92, 0.36), transparent 46%),
+    radial-gradient(circle at 50% 30%, #236f4b 0%, #123d2a 54%, #071e15 100%);
+  color: var(--ink);
+  min-height: 100vh;
+  background-attachment: fixed;
+}
+
+#app {
+  width: 100%;
+  max-width: none;
+  margin: 0 auto;
+  padding: 8px;
+}
+
+.app-shell {
+  /* #app 上下各 8px padding，避免 min-height:100vh 额外撑出纵向滚动条 */
+  min-height: calc(100vh - 16px);
+}
+
+/* 顶栏 */
+.app-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  overflow-y: hidden;
+  color: #eaf5ee;
+  margin-bottom: 6px;
+  padding: 5px 10px;
+  border-radius: 10px;
+  background: linear-gradient(180deg, rgba(6, 32, 21, 0.72), rgba(4, 24, 16, 0.45));
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.22);
+  backdrop-filter: blur(7px);
+  scrollbar-width: none;
+}
+.app-header::-webkit-scrollbar {
+  display: none;
+}
+.app-header h1 {
+  font-size: 17px;
+  margin: 0;
+  letter-spacing: 0.5px;
+  white-space: nowrap;
+}
+.app-header .status {
+  flex: 1;
+  min-width: 160px;
+  overflow: hidden;
+  font-size: 13px;
+  background: rgba(0, 0, 0, 0.22);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 7px;
+  padding: 5px 10px;
+  color: rgba(234, 245, 238, 0.92);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.app-header .status strong {
+  color: var(--gold-soft);
+}
+.app-header .el-button {
+  flex: none;
+  height: 29px;
+  margin-left: 0;
+  padding: 0 11px;
+  border-radius: 999px;
+  font-size: 13px;
+  font-weight: 600;
+}
+.app-body {
+  width: 100%;
+  min-width: 0;
+}
+
+.panel {
+  background: var(--paper);
+  border: 1px solid rgba(255, 255, 255, 0.45);
+  border-radius: 12px;
+  padding: 13px;
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.26);
+}
+.panel h3 {
+  margin: 0 0 8px;
+  font-size: 14px;
+  color: #3a4a40;
+  border-left: 3px solid var(--felt);
+  padding-left: 8px;
+}
+
+/* 通用小标签 */
+.tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  border-radius: 4px;
+  padding: 1px 6px;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.5;
+  white-space: nowrap;
+}
+.tag-gold {
+  background: #d9a300;
+  color: #2c2200;
+}
+.tag-green {
+  background: #2f7d57;
+  color: #f0fff6;
+}
+.tag-red {
+  background: #b83232;
+  color: #fff4f2;
+}
+.tag-gray {
+  background: rgba(255, 255, 255, 0.16);
+  color: #eaf5ee;
+}
+.tag-dark {
+  background: rgba(0, 0, 0, 0.28);
+  color: #ffe19a;
+}
+
+/* Element Plus 弹窗配色微调 */
+.el-dialog {
+  --el-dialog-border-radius: 14px;
+}
+.el-dialog__header {
+  margin-right: 0;
+}
+.el-dialog__title {
+  font-weight: 800;
+  color: #23382c;
+}
+.el-dialog__body {
+  color: #2f3f36;
+}
+.el-button {
+  font-weight: 600;
+}
+
+@media (max-width: 780px) {
+  #app {
+    padding: 6px;
+  }
+  .app-header h1 {
+    font-size: 14px;
+  }
+}
