@@ -101,9 +101,9 @@ describe('合法出牌：跟牌与首轮限制', () => {
     expect(result.sort()).toEqual([PIG, SPADE_A].sort());
   });
 
-  it('首副持♣2者必须领出♣2', () => {
+  it('首引花色无限制：领出时可按手中任意非受限牌领出', () => {
     const hand = [CLUB_2, PIG, HEART_2];
-    expect(legal(hand, { leadSuit: null, mustLeadCard: CLUB_2 })).toEqual([CLUB_2]);
+    expect(legal(hand, { leadSuit: null }).sort()).toEqual([CLUB_2, PIG, HEART_2].sort());
   });
 });
 

@@ -5,6 +5,7 @@ import {
   ALL_POSITIONS,
   EVENT_TYPE_TEXT,
   formatSigned,
+  scoreSignClass,
   seatName,
   teamOf,
   type GameEventType,
@@ -69,6 +70,7 @@ const eventTagClass: Record<GameEventType, string> = {
   MATCH_STARTED: 'tag-green',
   DEAL_CREATED: 'tag-gray',
   PLAYER_LIGHT_SUBMITTED: 'tag-gray',
+  LIGHT_RULE_UPDATED: 'tag-dark',
   AUTO_LIGHT_TRIGGERED: 'tag-gold',
   LIGHT_REVEALED: 'tag-gold',
   CARD_PLAYED: 'tag-green',
@@ -201,8 +203,15 @@ function exportJson(): void {
               <div class="summary-block">
                 <span class="summary-label">团队本副</span>
                 <span class="summary-value">
-                  A {{ formatSigned(currentDeal.score?.teamScores.A ?? 0) }} /
-                  B {{ formatSigned(currentDeal.score?.teamScores.B ?? 0) }}
+                  A
+                  <span :class="scoreSignClass(currentDeal.score?.teamScores.A ?? 0)">
+                    {{ formatSigned(currentDeal.score?.teamScores.A ?? 0) }}
+                  </span>
+                  /
+                  B
+                  <span :class="scoreSignClass(currentDeal.score?.teamScores.B ?? 0)">
+                    {{ formatSigned(currentDeal.score?.teamScores.B ?? 0) }}
+                  </span>
                   <span v-if="currentDeal.score?.slam.triggered" class="tag tag-gold mini">满贯 · 模拟分</span>
                 </span>
               </div>
@@ -210,7 +219,10 @@ function exportJson(): void {
                 <span class="summary-label">个人分</span>
                 <span class="summary-value">
                   <span v-for="pos in ALL_POSITIONS" :key="`rscore-${pos}`" class="person-score">
-                    {{ seatName(pos) }} {{ formatSigned(collectedPoints(pos)) }}
+                    {{ seatName(pos) }}
+                    <span :class="scoreSignClass(collectedPoints(pos))">
+                      {{ formatSigned(collectedPoints(pos)) }}
+                    </span>
                   </span>
                 </span>
               </div>
@@ -227,7 +239,13 @@ function exportJson(): void {
                 <span class="trick-title">第 {{ trickIndex + 1 }} / {{ currentDeal?.tricks.length }} 墩</span>
                 <span v-if="currentTrick.winner" class="trick-winner">
                   {{ seatName(currentTrick.winner) }}赢墩
-                  <template v-if="currentTrick.points !== 0"> · {{ formatSigned(currentTrick.points) }} 分</template>
+                  <template v-if="currentTrick.points !== 0">
+                    ·
+                    <span :class="scoreSignClass(currentTrick.points)">
+                      {{ formatSigned(currentTrick.points) }}
+                    </span>
+                    分
+                  </template>
                 </span>
                 <span class="trick-nav">
                   <el-button size="small" :disabled="trickIndex === 0" @click="prevTrick">上一墩</el-button>

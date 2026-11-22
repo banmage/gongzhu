@@ -5,6 +5,7 @@ import {
   endReasonText,
   formatSigned,
   resultText,
+  scoreSignClass,
   teamName,
   type TeamOrNone,
 } from '../models/game';
@@ -96,9 +97,9 @@ function onLobby(): void {
               </td>
               <td>{{ record.dealsPlayed }}</td>
               <td>
-                <span class="team-a">{{ formatSigned(record.smallScores.A) }}</span>
+                <span class="score-cell" :class="scoreSignClass(record.smallScores.A)">{{ formatSigned(record.smallScores.A) }}</span>
                 /
-                <span class="team-b">{{ formatSigned(record.smallScores.B) }}</span>
+                <span class="score-cell" :class="scoreSignClass(record.smallScores.B)">{{ formatSigned(record.smallScores.B) }}</span>
               </td>
               <td>
                 <span class="pig-a">+{{ record.newPigHeads.A }}</span>
@@ -297,12 +298,7 @@ function onLobby(): void {
   padding: 0 3px;
   font-size: 9px;
 }
-.team-a {
-  color: #1d6b45;
-  font-weight: 800;
-}
-.team-b {
-  color: #8a4b1d;
+.score-cell {
   font-weight: 800;
 }
 .pig-a {

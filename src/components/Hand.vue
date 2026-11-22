@@ -252,15 +252,15 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .hand {
-  --hand-card-w: 108px;
-  --hand-card-h: 150px;
-  --hand-card-step: 32px;
-  --hand-card-radius: 11px;
-  --hand-label-size: 27px;
-  --hand-corner-size: 21px;
-  --hand-pip-size: 24px;
-  --hand-court-size: 60px;
-  --hand-back-spade-size: 40px;
+  --hand-card-w: 116px;
+  --hand-card-h: 161px;
+  --hand-card-step: 34px;
+  --hand-card-radius: 12px;
+  --hand-label-size: 29px;
+  --hand-corner-size: 22px;
+  --hand-pip-size: 26px;
+  --hand-court-size: 64px;
+  --hand-back-spade-size: 43px;
   --card-overlap: calc(var(--hand-card-step) - var(--hand-card-w));
   position: relative;
   display: flex;
@@ -535,155 +535,155 @@ onBeforeUnmount(() => {
 /* 响应式尺寸（与 bridge MVP 保持一致的牌桌比例） */
 @media (min-width: 1600px) {
   .hand {
-    --hand-card-w: 116px;
-    --hand-card-h: 162px;
-    --hand-card-step: 35px;
-    --hand-card-radius: 12px;
-    --hand-label-size: 29px;
-    --hand-corner-size: 23px;
-    --hand-pip-size: 26px;
-    --hand-court-size: 64px;
-    --hand-back-spade-size: 43px;
+    --hand-card-w: 124px;
+    --hand-card-h: 173px;
+    --hand-card-step: 38px;
+    --hand-card-radius: 13px;
+    --hand-label-size: 31px;
+    --hand-corner-size: 24px;
+    --hand-pip-size: 28px;
+    --hand-court-size: 68px;
+    --hand-back-spade-size: 46px;
   }
 }
 @media (min-width: 1800px) {
   .hand {
-    --hand-card-w: 128px;
-    --hand-card-h: 178px;
-    --hand-card-step: 41px;
-    --hand-card-radius: 13px;
-    --hand-label-size: 32px;
-    --hand-corner-size: 25px;
-    --hand-pip-size: 28px;
-    --hand-court-size: 70px;
-    --hand-back-spade-size: 47px;
+    --hand-card-w: 136px;
+    --hand-card-h: 189px;
+    --hand-card-step: 44px;
+    --hand-card-radius: 14px;
+    --hand-label-size: 34px;
+    --hand-corner-size: 27px;
+    --hand-pip-size: 30px;
+    --hand-court-size: 75px;
+    --hand-back-spade-size: 50px;
   }
 }
 @media (min-width: 2000px) {
   .hand {
-    --hand-card-w: 142px;
-    --hand-card-h: 198px;
-    --hand-card-step: 48px;
-    --hand-card-radius: 14px;
-    --hand-label-size: 35px;
-    --hand-corner-size: 27px;
-    --hand-pip-size: 31px;
-    --hand-court-size: 78px;
-    --hand-back-spade-size: 52px;
+    --hand-card-w: 150px;
+    --hand-card-h: 209px;
+    --hand-card-step: 52px;
+    --hand-card-radius: 15px;
+    --hand-label-size: 37px;
+    --hand-corner-size: 29px;
+    --hand-pip-size: 33px;
+    --hand-court-size: 83px;
+    --hand-back-spade-size: 55px;
   }
 }
 @media (max-width: 1419px) {
   .hand {
+    --hand-card-w: 110px;
+    --hand-card-h: 154px;
+    --hand-card-step: 31px;
+    --hand-card-radius: 11px;
+    --hand-label-size: 28px;
+    --hand-corner-size: 21px;
+    --hand-pip-size: 25px;
+    --hand-court-size: 62px;
+    --hand-back-spade-size: 40px;
+  }
+}
+@media (max-width: 1299px) {
+  .hand {
     --hand-card-w: 104px;
     --hand-card-h: 146px;
-    --hand-card-step: 29px;
+    --hand-card-step: 28px;
     --hand-card-radius: 10px;
     --hand-label-size: 26px;
     --hand-corner-size: 20px;
     --hand-pip-size: 23px;
     --hand-court-size: 58px;
-    --hand-back-spade-size: 38px;
-  }
-}
-@media (max-width: 1299px) {
-  .hand {
-    --hand-card-w: 100px;
-    --hand-card-h: 140px;
-    --hand-card-step: 27px;
-    --hand-card-radius: 10px;
-    --hand-label-size: 24px;
-    --hand-corner-size: 19px;
-    --hand-pip-size: 22px;
-    --hand-court-size: 56px;
-    --hand-back-spade-size: 37px;
+    --hand-back-spade-size: 39px;
   }
 }
 @media (max-width: 1199px) {
   .hand {
-    --hand-card-w: 94px;
-    --hand-card-h: 131px;
-    --hand-card-step: 20px;
-    --hand-card-radius: 9px;
-    --hand-label-size: 17px;
-    --hand-corner-size: 16px;
-    --hand-pip-size: 21px;
-    --hand-court-size: 52px;
-    --hand-back-spade-size: 34px;
+    --hand-card-w: 100px;
+    --hand-card-h: 140px;
+    --hand-card-step: 22px;
+    --hand-card-radius: 10px;
+    --hand-label-size: 19px;
+    --hand-corner-size: 17px;
+    --hand-pip-size: 23px;
+    --hand-court-size: 56px;
+    --hand-back-spade-size: 36px;
   }
 }
 @media (max-width: 1099px) {
   .hand {
-    --hand-card-w: 88px;
-    --hand-card-h: 123px;
-    --hand-card-step: 18px;
-    --hand-card-radius: 8px;
-    --hand-label-size: 15px;
-    --hand-corner-size: 14px;
-    --hand-pip-size: 19px;
-    --hand-court-size: 48px;
-    --hand-back-spade-size: 31px;
+    --hand-card-w: 92px;
+    --hand-card-h: 129px;
+    --hand-card-step: 20px;
+    --hand-card-radius: 9px;
+    --hand-label-size: 17px;
+    --hand-corner-size: 15px;
+    --hand-pip-size: 21px;
+    --hand-court-size: 50px;
+    --hand-back-spade-size: 33px;
   }
 }
 @media (max-width: 999px) {
   .hand {
-    --hand-card-w: 84px;
-    --hand-card-h: 117px;
-    --hand-card-step: 15px;
-    --hand-card-radius: 8px;
-    --hand-label-size: 12px;
-    --hand-corner-size: 12px;
-    --hand-pip-size: 17px;
-    --hand-court-size: 44px;
-    --hand-back-spade-size: 28px;
+    --hand-card-w: 88px;
+    --hand-card-h: 123px;
+    --hand-card-step: 17px;
+    --hand-card-radius: 9px;
+    --hand-label-size: 14px;
+    --hand-corner-size: 13px;
+    --hand-pip-size: 19px;
+    --hand-court-size: 46px;
+    --hand-back-spade-size: 30px;
   }
 }
 @media (max-width: 880px) {
   .hand {
-    --hand-card-w: 108px;
-    --hand-card-h: 150px;
-    --hand-card-step: 38px;
-    --hand-card-radius: 11px;
-    --hand-label-size: 27px;
-    --hand-corner-size: 21px;
-    --hand-pip-size: 24px;
-    --hand-court-size: 60px;
-    --hand-back-spade-size: 40px;
+    --hand-card-w: 116px;
+    --hand-card-h: 161px;
+    --hand-card-step: 40px;
+    --hand-card-radius: 12px;
+    --hand-label-size: 29px;
+    --hand-corner-size: 22px;
+    --hand-pip-size: 26px;
+    --hand-court-size: 64px;
+    --hand-back-spade-size: 43px;
   }
 }
 @media (max-width: 700px) {
   .hand {
-    --hand-card-w: 104px;
-    --hand-card-h: 146px;
-    --hand-card-step: 34px;
-    --hand-label-size: 26px;
-    --hand-corner-size: 20px;
+    --hand-card-w: 110px;
+    --hand-card-h: 154px;
+    --hand-card-step: 36px;
+    --hand-label-size: 28px;
+    --hand-corner-size: 21px;
   }
 }
 @media (max-width: 600px) {
   .hand {
-    --hand-card-w: 100px;
-    --hand-card-h: 140px;
-    --hand-card-step: 30px;
-    --hand-label-size: 24px;
-    --hand-corner-size: 19px;
+    --hand-card-w: 106px;
+    --hand-card-h: 148px;
+    --hand-card-step: 32px;
+    --hand-label-size: 26px;
+    --hand-corner-size: 20px;
   }
 }
 @media (max-width: 480px) {
   .hand {
-    --hand-card-w: 96px;
-    --hand-card-h: 134px;
-    --hand-card-step: 26px;
-    --hand-label-size: 22px;
-    --hand-corner-size: 18px;
+    --hand-card-w: 100px;
+    --hand-card-h: 140px;
+    --hand-card-step: 28px;
+    --hand-label-size: 24px;
+    --hand-corner-size: 19px;
   }
 }
 @media (max-width: 400px) {
   .hand {
-    --hand-card-w: 92px;
-    --hand-card-h: 128px;
-    --hand-card-step: 22px;
-    --hand-label-size: 20px;
-    --hand-corner-size: 16px;
+    --hand-card-w: 96px;
+    --hand-card-h: 134px;
+    --hand-card-step: 24px;
+    --hand-label-size: 22px;
+    --hand-corner-size: 17px;
   }
 }
 
@@ -768,15 +768,15 @@ onBeforeUnmount(() => {
 /* 矮屏（常见笔记本）优先保证整桌不滚动，手牌略收但仍大于原尺寸 */
 @media (max-height: 860px) and (min-width: 1000px) {
   .hand.pos-S:not(.compact) {
-    --hand-card-w: 120px;
-    --hand-card-h: 167px;
+    --hand-card-w: 128px;
+    --hand-card-h: 179px;
     --hand-card-step: clamp(36px, 3.9vw, 64px);
-    --hand-card-radius: 12px;
-    --hand-label-size: 31px;
-    --hand-corner-size: 24px;
-    --hand-pip-size: 27px;
-    --hand-court-size: 71px;
-    --hand-back-spade-size: 47px;
+    --hand-card-radius: 13px;
+    --hand-label-size: 33px;
+    --hand-corner-size: 26px;
+    --hand-pip-size: 29px;
+    --hand-court-size: 76px;
+    --hand-back-spade-size: 50px;
   }
 }
 </style>

@@ -1,0 +1,180 @@
+```yaml
+# 中式拱猪 2v2对家版 - AI亮牌决策规则配置
+# 版本：v1.0
+# 模块：A(分数临界) / B(牌型牌点) / C(满贯预判) / D(综合判定约束)
+# 说明：所有参数均可调整；代码逻辑固定，策略全部由本配置驱动
+# Flag_gamble 枚举定义
+# 0: 常规局 Normal
+# 1: 绝境博弈 Gamble
+# 2: 殉爆殉爆模式 Detonate (我方极近-1000，追求同归于尽)
+# 3: 冲锋模式 Rush (我方极近+1000，放大优势冲线)
+
+meta:
+  game: "双人对家拱猪 亮牌AI策略"
+  version: "1.0"
+  win_lose_bound:
+    s_max: 1000
+    s_min: -1000
+
+# ========== 模块A：分数临界基准规则 ==========
+module_A:
+  threshold:
+    t_risk: 0.4        # 低于该r_me^- 进入绝境博弈分支 (对应 S_me < -600)
+    t_op_win: 0.3      # 敌方r_op^+低于此，硬锁亮羊，P_base_sheep=0 (S_op>700)
+  sigmoid_k:
+    pig:
+      k1: 3
+      k2: 3
+      kg: 3
+    hA:
+      k1_prime: 4
+      k2_prime: 4
+      kg_prime: 4
+    sheep:
+      k3: 3
+      k4: 4
+    trans:
+      k5: 3
+      k6: 3
+      k5g: 3
+
+# ========== 模块B：牌型、张数、牌点、控牌弹性修正因子 ==========
+module_B:
+  # 张数基础因子表
+  count_factor_table:
+    pig:
+      "1": 0.30
+      "2": 0.42
+      "3": 0.55
+      "4": 1.00
+      "5+": 1.40
+    sheep:
+      "1": 0.35
+      "2": 0.55
+      "3": 0.80
+      "4": 1.15
+      "5+": 1.60
+    hA:
+      # hA仅有一张，因子由红桃套整体质量计算，本表仅保留占位
+      "1": 1.0
+    trans:
+      "1": 0.40
+      "2": 0.60
+      "3": 0.85
+      "4": 1.10
+      "5+": 1.30
+  zero_risk_trans_bonus: 1.30 # 无风险张(无红桃大牌、猪AK)时变压器额外保底系数
+  clamp_range:
+    min: 0.1
+    max: 2.0
+
+# ========== 模块C：满贯预判修正因子权重 ==========
+module_C:
+  weight:
+    pig:
+      normal:   {w_opp: 0.75, w_self: 0.25}
+      gamble:   {w_opp: 0.40, w_self: 0.30}
+      detonate: {w_opp: 0.15, w_self: 0.40}
+      rush:     {w_opp: 0.60, w_self: 0.40}
+    hA:
+      normal:   {w_opp: 0.85, w_self: 0.35}
+      gamble:   {w_opp: 0.50, w_self: 0.40}
+      detonate: {w_opp: 0.20, w_self: 0.45}
+      rush:     {w_opp: 0.70, w_self: 0.50}
+    sheep:
+      normal:   {w_opp: 0.50, w_self: 0.40}
+      gamble:   {w_opp: 0.30, w_self: 0.45}
+      detonate: {w_opp: 0.10, w_self: 0.45}
+      rush:     {w_opp: 0.40, w_self: 0.60}
+    trans:
+      normal:   {w_opp: 0.80, w_self: 0.50}
+      gamble:   {w_opp: 0.40, w_self: 0.55}
+      detonate: {w_opp: 0.05, w_self: 0.70}
+      rush:     {w_opp: 0.50, w_self: 0.80}
+  clamp_range:
+    pig:   {min: 0.20, max: 1.60}
+    hA:    {min: 0.15, max: 1.70}
+    sheep: {min: 0.30, max: 1.80}
+    trans: {min: 0.20, max: 2.00}
+
+# ========== 模块D：综合判定、互斥惩罚、阈值、上限控制 ==========
+module_D:
+  # 互斥惩罚因子 F_mutex
+  mutex_table:
+    pig_hA:
+      normal:   0.50
+      gamble:   0.65
+      detonate: 0.85
+      rush:     0.40
+    pig_sheep:
+      normal:   0.75
+      gamble:   0.82
+      detonate: 0.90
+      rush:     0.80
+    pig_trans:
+      normal:   0.60
+      gamble:   0.70
+      detonate: 0.88
+      rush:     0.50
+    hA_sheep:
+      normal:   0.70
+      gamble:   0.78
+      detonate: 0.90
+      rush:     0.75
+    hA_trans:
+      normal:   0.55
+      gamble:   0.68
+      detonate: 0.88
+      rush:     0.45
+    sheep_trans:
+      normal:   0.85
+      gamble:   0.88
+      detonate: 0.92
+      rush:     0.95
+    three_plus:
+      normal:   0.35
+      gamble:   0.50
+      detonate: 0.75
+      rush:     0.30
+  # 各模式单局最大亮牌数量
+  max_light_count:
+    normal:   2
+    gamble:   2
+    detonate: 3
+    rush:     2
+  # 判定阈值 T_X
+  threshold_table:
+    pig:
+      normal:   0.60
+      gamble:   0.45
+      detonate: 0.25
+      rush:     0.70
+    hA:
+      normal:   0.65
+      gamble:   0.50
+      detonate: 0.25
+      rush:     0.75
+    sheep:
+      normal:   0.45
+      gamble:   0.40
+      detonate: 0.30
+      rush:     0.35
+    trans:
+      normal:   0.55
+      gamble:   0.45
+      detonate: 0.20
+      rush:     0.30
+  # 硬禁止规则开关
+  hard_ban:
+    rush_ban_pig_hA: true   # 冲锋模式禁止同时亮猪+红桃A
+  # 四张亮出3张后自动亮剩余一张的全局开关
+  auto_light_last: false
+  # 调试模式：true=直接阈值判定，false=随机采样
+  debug_deterministic: false
+```
+
+### 使用说明
+1. 结构完全对应 A/B/C/D 四模块，所有系数、阈值、惩罚表都在配置里，不需要修改业务公式；
+2. 代码读取顺序：A → B → C → D；A 的硬否决优先级最高；
+3. `flag_gamble` 由模块A的分数逻辑自动判定，作为索引取本表不同分支参数；
+4. 如果你想要，我可以同步输出一份配套的 JSON 版本，或者写一份【加载这份yaml的伪代码】。

@@ -1,11 +1,11 @@
 <script setup lang="ts">
-import { ref } from 'vue';
+import { computed, ref } from 'vue';
 import { useGameStore } from '../store/game';
 import { HEART_A, PIG, SHEEP, TRANSFORMER, cardLabel } from '../models/card';
 import type { MatchFormat } from '../models/game';
 import PlayingCard from './PlayingCard.vue';
 
-const emit = defineEmits<{ (e: 'rules'): void }>();
+const emit = defineEmits<{ (e: 'rules'): void; (e: 'light-rules'): void }>();
 const store = useGameStore();
 
 const format = ref<MatchFormat>(5);
@@ -13,6 +13,20 @@ const seedText = ref('');
 const error = ref('');
 
 const keyCards = [PIG, SHEEP, TRANSFORMER, HEART_A];
+
+/** 勾选“无读秒”时把时限设为 0；取消时恢复常用默认值 */
+const lightNoCountdown = computed({
+  get: () => store.config.lightSeconds <= 0,
+  set: (value: boolean) => {
+    store.config.lightSeconds = value ? 0 : 30;
+  },
+});
+const playNoCountdown = computed({
+  get: () => store.config.playSeconds <= 0,
+  set: (value: boolean) => {
+    store.config.playSeconds = value ? 0 : 20;
+  },
+});
 
 function start(): void {
   const raw = seedText.value.trim();
@@ -45,7 +59,7 @@ function start(): void {
         </p>
         <div class="hero-tags">
           <span class="tag tag-gold">亮牌公开</span>
-          <span class="tag tag-gold">自动亮最后一张</span>
+          <span class="tag tag-gold">第四张可配置自动亮</span>
           <span class="tag tag-green">首轮限制</span>
           <span class="tag tag-green">满贯 / 全红 / 窝猪</span>
           <span class="tag tag-dark">可复现发牌审计</span>
@@ -53,6 +67,7 @@ function start(): void {
         <div class="hero-actions">
           <el-button type="primary" size="large" @click="start">开始对局</el-button>
           <el-button size="large" @click="emit('rules')">查看规则</el-button>
+          <el-button size="large" @click="emit('light-rules')">亮牌规则管理</el-button>
         </div>
       </div>
 
@@ -106,25 +121,52 @@ function start(): void {
         <div class="settings-block">
           <div class="settings-title">对局参数</div>
           <div class="settings-grid">
-            <label class="setting-item">
-              <span>亮牌时限（秒）</span>
-              <input v-model.number="store.config.lightSeconds" type="number" min="5" max="120" />
-            </label>
-            <label class="setting-item">
-              <span>出牌时限（秒）</span>
-              <input v-model.number="store.config.playSeconds" type="number" min="5" max="120" />
-            </label>
+            <div class="setting-item">
+              <span>亮牌读秒（秒）</span>
+              <div class="time-control">
+                <input
+                  v-model.number="store.config.lightSeconds"
+                  type="number"
+                  min="5"
+                  max="60"
+                  :disabled="lightNoCountdown"
+                />
+                <label class="no-countdown">
+                  <input v-model="lightNoCountdown" type="checkbox" />
+                  无读秒
+                </label>
+              </div>
+            </div>
+            <div class="setting-item">
+              <span>出牌读秒（秒）</span>
+              <div class="time-control">
+                <input
+                  v-model.number="store.config.playSeconds"
+                  type="number"
+                  min="5"
+                  max="60"
+                  :disabled="playNoCountdown"
+                />
+                <label class="no-countdown">
+                  <input v-model="playNoCountdown" type="checkbox" />
+                  无读秒
+                </label>
+              </div>
+            </div>
             <label class="setting-item">
               <span>单局副数上限</span>
               <input v-model.number="store.config.dealLimit" type="number" min="1" max="60" />
             </label>
-            <label class="setting-item switch-item">
-              <span>自动亮最后一张</span>
-              <el-switch v-model="store.config.autoLightLastOne" size="small" />
+            <label class="setting-item">
+              <span>已亮 3 张后的第 4 张</span>
+              <select v-model="store.config.autoLightLastOne" class="setting-select">
+                <option :value="true">自动亮</option>
+                <option :value="false">不自动亮（手动）</option>
+              </select>
             </label>
           </div>
           <p class="settings-note">
-            V3.1 默认：亮牌 30s / 出牌 20s / 单局 20 副 / 自动亮开启。修改后仅影响新开的对局。
+            读秒可设为 5–60 秒，或勾选“无读秒”关闭倒计时。第四张自动亮可选择开启或关闭。修改后仅影响新开的对局。
           </p>
         </div>
       </section>
@@ -138,15 +180,15 @@ function start(): void {
           </div>
           <div class="seat-line a">
             <span class="seat-avatar">北</span>
-            <span class="seat-info"><strong>北家</strong><small>A队 · 基础策略 AI</small></span>
+            <span class="seat-info"><strong>北家</strong><small>A队 · 概率团队 AI</small></span>
           </div>
           <div class="seat-line b">
             <span class="seat-avatar">东</span>
-            <span class="seat-info"><strong>东家</strong><small>B队 · 基础策略 AI</small></span>
+            <span class="seat-info"><strong>东家</strong><small>B队 · 概率团队 AI</small></span>
           </div>
           <div class="seat-line b">
             <span class="seat-avatar">西</span>
-            <span class="seat-info"><strong>西家</strong><small>B队 · 基础策略 AI</small></span>
+            <span class="seat-info"><strong>西家</strong><small>B队 · 概率团队 AI</small></span>
           </div>
         </div>
         <p class="seat-note">出牌顺序逆时针：南 → 东 → 北 → 西。可在对局中开启“托管南家”做全机器演示。</p>
@@ -155,9 +197,9 @@ function start(): void {
       <section class="start-card flow-card">
         <h2>一副牌的流程</h2>
         <ol class="flow-list">
-          <li><span>1</span><div><strong>发牌</strong>每人 13 张；每局第一副持 ♣2 者必须首引 ♣2。</div></li>
-          <li><span>2</span><div><strong>亮牌</strong>选择亮 ♠Q / ♦J / ♣10 / ♥A；提交后正面公开。</div></li>
-          <li><span>3</span><div><strong>揭晓</strong>全员提交后统一公开；已亮 3 张时自动亮最后一张。</div></li>
+          <li><span>1</span><div><strong>发牌</strong>每人 13 张；每局第一副持 ♠3 者领出，首引花色不限。</div></li>
+          <li><span>2</span><div><strong>亮牌</strong>选择亮 ♠Q / ♦J / ♣10 / ♥A；系统按当前亮牌规则推荐，管理员可热更新规则。</div></li>
+          <li><span>3</span><div><strong>揭晓</strong>全员提交后统一公开；开启自动亮时，已亮 3 张后自动亮最后一张。</div></li>
           <li><span>4</span><div><strong>出牌</strong>13 墩，有领出花色必须跟牌；受首轮限制的亮牌不能出。</div></li>
           <li><span>5</span><div><strong>结算</strong>个人分 → 团队小分 → 画猪头；满贯立即赢下本局。</div></li>
         </ol>
@@ -166,7 +208,11 @@ function start(): void {
 
     <div class="start-footer">
       <span>本游戏按《中式拱猪_对家双人队赛_SRS_V3.1》实现；⚠️ 临时默认项已按 V3.1 默认值启用。</span>
-      <span>发牌审计：算法版本 + 随机种子 + 发牌哈希</span>
+      <span>
+        亮牌规则 {{ store.lightRuleRuntime.config.meta.version }} ·
+        {{ store.lightRuleRuntime.source === 'builtin' ? '内置默认' : '管理员自定义' }} ·
+        发牌审计：算法版本 + 随机种子 + 发牌哈希
+      </span>
     </div>
   </div>
 </template>
@@ -250,6 +296,7 @@ function start(): void {
 }
 .hero-actions {
   display: flex;
+  flex-wrap: wrap;
   gap: 10px;
   margin-top: 6px;
 }
@@ -469,8 +516,48 @@ function start(): void {
   border-color: #2f7d57;
   box-shadow: 0 0 0 2px rgba(47, 125, 87, 0.15);
 }
-.switch-item {
-  justify-content: flex-end;
+.setting-item input:disabled {
+  background: #eef1ea;
+  color: #9aa89f;
+}
+.time-control {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.time-control input[type='number'] {
+  flex: 1;
+  min-width: 0;
+}
+.no-countdown {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  flex: none;
+  color: #6b7a70;
+  font-size: 10px;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.no-countdown input {
+  width: auto;
+  margin: 0;
+  padding: 0;
+}
+.setting-select {
+  width: 100%;
+  padding: 5px 7px;
+  border-radius: 6px;
+  border: 1px solid #cfdacb;
+  background: #fff;
+  color: #23382c;
+  font-size: 11px;
+  outline: none;
+}
+.setting-select:focus {
+  border-color: #2f7d57;
+  box-shadow: 0 0 0 2px rgba(47, 125, 87, 0.15);
 }
 .settings-note {
   margin: 6px 0 0;

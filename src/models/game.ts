@@ -72,17 +72,22 @@ export interface GameConfig {
   format: MatchFormat;
   /** 单局限副数（兜底终止） */
   dealLimit: number;
-  /** 自动亮最后一张 */
+  /** 已亮 3 张关键牌后，是否自动亮出剩余第 4 张 */
   autoLightLastOne: boolean;
-  /** 亮牌阶段时限（秒） */
+  /** 亮牌阶段时限（秒，0 表示无读秒） */
   lightSeconds: number;
-  /** 每墩出牌时限（秒） */
+  /** 每墩出牌时限（秒，0 表示无读秒） */
   playSeconds: number;
   /** 断线保留时长（秒，展示用） */
   disconnectSeconds: number;
   /** AI 思考延迟基数（毫秒） */
   aiDelayMs: number;
 }
+
+/** 可配置读秒范围（秒）；0 表示无读秒 */
+export const MIN_COUNTDOWN_SECONDS = 5;
+export const MAX_COUNTDOWN_SECONDS = 60;
+export const NO_COUNTDOWN_SECONDS = 0;
 
 export const DEFAULT_CONFIG: GameConfig = {
   format: 5,
@@ -93,6 +98,19 @@ export const DEFAULT_CONFIG: GameConfig = {
   disconnectSeconds: 60,
   aiDelayMs: 750,
 };
+
+/**
+ * 规范化读秒配置：0 保留为“无读秒”；其余值限制在 5~60 秒。
+ * 传入非法值时回退到默认值。
+ */
+export function normalizeCountdownSeconds(value: number, fallback: number): number {
+  if (value === null || value === undefined || String(value).trim() === '') return fallback;
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return fallback;
+  const rounded = Math.round(numeric);
+  if (rounded === 0) return NO_COUNTDOWN_SECONDS;
+  return Math.max(MIN_COUNTDOWN_SECONDS, Math.min(MAX_COUNTDOWN_SECONDS, rounded));
+}
 
 /* ------------------------------------------------------------------ *
  * 牌局实体
@@ -127,6 +145,8 @@ export interface ScoreBreakdown {
   pigBase: number;
   pigLitAdj: number;
   ownPigAdj: number;
+  /** 亮猪者手中只有单张黑桃，自收♠Q 免窝猪 */
+  ownPigExempt: boolean;
   pigTotal: number;
 
   sheepBase: number;
@@ -204,8 +224,8 @@ export interface DealState {
   hands: Record<Position, number[]>;
   originalHands: Record<Position, number[]>;
   leader: Position;
-  /** 本局第一副：持♣2者领出且必须出♣2 */
-  forcedClub2: boolean;
+  /** 本局第一副：持♠3者领出，首引花色不限 */
+  openingDeal: boolean;
 
   litCards: number[];
   litBy: Record<number, Position>;
@@ -270,6 +290,7 @@ export type GameEventType =
   | 'MATCH_STARTED'
   | 'DEAL_CREATED'
   | 'PLAYER_LIGHT_SUBMITTED'
+  | 'LIGHT_RULE_UPDATED'
   | 'AUTO_LIGHT_TRIGGERED'
   | 'LIGHT_REVEALED'
   | 'CARD_PLAYED'
@@ -296,6 +317,7 @@ export const EVENT_TYPE_TEXT: Record<GameEventType, string> = {
   MATCH_STARTED: '开赛',
   DEAL_CREATED: '发牌',
   PLAYER_LIGHT_SUBMITTED: '亮牌提交',
+  LIGHT_RULE_UPDATED: '亮牌规则更新',
   AUTO_LIGHT_TRIGGERED: '自动亮',
   LIGHT_REVEALED: '亮牌揭晓',
   CARD_PLAYED: '出牌',
@@ -314,7 +336,7 @@ export interface DealRecord {
   seed: number;
   roundNumber: number;
   leader: Position;
-  forcedClub2: boolean;
+  openingDeal: boolean;
   litCards: number[];
   litBy: Record<number, Position>;
   autoLitCards: number[];
@@ -343,4 +365,11 @@ export function endReasonText(reason: RoundEndReason): string {
 
 export function formatSigned(value: number): string {
   return value > 0 ? `+${value}` : `${value}`;
+}
+
+/** 分数着色：正分红、负分绿、零分中性色（样式定义见 style.css） */
+export function scoreSignClass(value: number): 'score-pos' | 'score-neg' | 'score-zero' {
+  if (value > 0) return 'score-pos';
+  if (value < 0) return 'score-neg';
+  return 'score-zero';
 }

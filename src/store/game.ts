@@ -1,11 +1,12 @@
-import { computed, reactive, ref } from 'vue';
+import { computed, reactive, ref, watch } from 'vue';
 import { defineStore } from 'pinia';
-import { CLUB_2, KEY_CARDS, PIG, cardBasePoints, cardLabel, getSuit, isKeyCard } from '../models/card';
+import { KEY_CARDS, PIG, SPADE_3, cardBasePoints, cardLabel, getSuit, isKeyCard } from '../models/card';
 import {
   ALL_POSITIONS,
   DEAL_ORDER,
   DEFAULT_CONFIG,
   formatSigned,
+  normalizeCountdownSeconds,
   otherTeam,
   resultText,
   seatName,
@@ -42,6 +43,16 @@ import {
 } from '../core/rules';
 import { scoreDeal } from '../core/scoring';
 import { chooseLights, choosePlay } from '../core/ai';
+import { buildPlayObservation, type PlayObservation } from '../core/aiObservation';
+import {
+  activateLightRule,
+  getActiveLightRule,
+  lightRuleRuntime,
+  resetLightRuleRegistry,
+  serializeLightRule,
+} from '../rules/lightRuleRegistry';
+import type { LightRuleConfig } from '../rules/lightRuleConfig';
+import { cancelCountdownSpeech, isFinalCountdown, speakCountdown } from '../core/countdown';
 
 /** 发牌动画每张牌的间隔 */
 const DEAL_TICK_MS = 24;
@@ -165,11 +176,13 @@ export const useGameStore = defineStore('gongzhu', () => {
   function clearLightCountdown(): void {
     if (lightCountdownTimer !== null) clearInterval(lightCountdownTimer);
     lightCountdownTimer = null;
+    cancelCountdownSpeech();
   }
 
   function clearPlayCountdown(): void {
     if (playCountdownTimer !== null) clearInterval(playCountdownTimer);
     playCountdownTimer = null;
+    cancelCountdownSpeech();
   }
 
   function clearAiTimer(): void {
@@ -231,6 +244,29 @@ export const useGameStore = defineStore('gongzhu', () => {
     () => phase.value === 'playing' && !settling.value && deal.value?.nextPlayer === 'S' && !isAiSeat('S'),
   );
 
+  /** 亮牌读秒：只在南家仍需提交且剩余时间进入最后读秒区间时显示 */
+  const lightCountdownVisible = computed(() => {
+    const current = deal.value;
+    return (
+      phase.value === 'lighting' &&
+      config.lightSeconds > 0 &&
+      isFinalCountdown(lightCountdown.value) &&
+      !!current &&
+      !current.submitted.S &&
+      !isAiSeat('S') &&
+      current.hands.S.some((card) => isKeyCard(card))
+    );
+  });
+
+  /** 出牌读秒：只在轮到南家且剩余时间进入最后读秒区间时显示 */
+  const playCountdownVisible = computed(
+    () =>
+      phase.value === 'playing' &&
+      config.playSeconds > 0 &&
+      isFinalCountdown(countdown.value) &&
+      isHumanTurn.value,
+  );
+
   const dealResultVisible = computed(() => phase.value === 'scoring' && !!deal.value?.score);
   /** 结算弹窗是否展开：关闭后仍可再次打开 */
   const dealResultOpen = computed(() => dealResultVisible.value && !dealResultDismissed.value);
@@ -254,6 +290,44 @@ export const useGameStore = defineStore('gongzhu', () => {
     return ALL_POSITIONS.filter((pos) => deal.value!.submitted[pos]).length;
   });
 
+  /** 当前已公开的亮牌（open 模式）：已揭晓 + 亮牌阶段已提交的牌。 */
+  function publiclyLitCards(current: DealState): number[] {
+    const cards = new Set<number>(current.litCards);
+    if (phase.value === 'lighting') {
+      for (const pos of ALL_POSITIONS) {
+        for (const card of current.submissions[pos]) cards.add(card);
+      }
+    }
+    return [...cards];
+  }
+
+  /**
+   * 按当前激活的亮牌规则（可热插拔）计算某座位的推荐亮牌。
+   * 规则引擎只使用该座位手牌与公开信息。
+   */
+  function recommendLightsFor(pos: Position): number[] {
+    const current = deal.value;
+    if (!current) return [];
+    return chooseLights({
+      hand: current.hands[pos],
+      position: pos,
+      teamSmallScore: round.smallScores[teamOf(pos)],
+      opponentSmallScore: round.smallScores[otherTeam(teamOf(pos))],
+      dealIndex: current.index,
+      litCount: submittedLitCount.value,
+      seed: current.seed,
+      litCards: publiclyLitCards(current),
+      rule: getActiveLightRule(),
+    });
+  }
+
+  /** 管理员热更新规则后，立即刷新南家尚未提交的推荐亮牌。 */
+  function refreshHumanLightRecommendation(): void {
+    const current = deal.value;
+    if (!current || phase.value !== 'lighting' || current.submitted.S || isAiSeat('S')) return;
+    humanLightSelection.value = recommendLightsFor('S');
+  }
+
   /** 发牌动画中每个座位已经收到的牌数 */
   function dealtCount(pos: Position): number {
     const index = DEAL_ORDER.indexOf(pos);
@@ -275,15 +349,26 @@ export const useGameStore = defineStore('gongzhu', () => {
     const leadSuit = current.currentTrick.plays.length
       ? getSuit(current.currentTrick.plays[0].card)
       : null;
-    const mustLeadCard =
-      current.forcedClub2 && leadSuit === null && pos === current.leader ? CLUB_2 : null;
     return getLegalCards({
       hand: current.hands[pos],
       leadSuit,
       isFirstLedSuit: current.currentTrick.isFirstLed,
       litCards: current.litCards,
       suitStatus: current.firstLedSuitStatus,
-      mustLeadCard,
+    });
+  }
+
+  /** 构造只含公开信息的出牌观察，供概率出牌 AI 使用。 */
+  function playObservationFor(pos: Position, legal: number[]): PlayObservation {
+    const current = deal.value;
+    if (!current) throw new Error('当前没有进行中的牌局');
+    return buildPlayObservation({
+      deal: current,
+      self: pos,
+      round,
+      match,
+      config,
+      legalCards: legal,
     });
   }
 
@@ -343,10 +428,16 @@ export const useGameStore = defineStore('gongzhu', () => {
     ] as const;
   });
 
-  /** 当前回合的倒计时展示值 */
+  /** 当前回合的倒计时展示值：仅在最后读秒区间显示具体秒数 */
   const countdownText = computed(() => {
-    if (phase.value === 'lighting') return `${lightCountdown.value}s`;
-    if (phase.value === 'playing' && !isAiSeat(deal.value?.nextPlayer ?? 'S')) return `${countdown.value}s`;
+    if (phase.value === 'lighting') {
+      if (config.lightSeconds <= 0) return '不限时';
+      return lightCountdownVisible.value ? `${lightCountdown.value}s` : '—';
+    }
+    if (phase.value === 'playing' && !isAiSeat(deal.value?.nextPlayer ?? 'S')) {
+      if (config.playSeconds <= 0) return '不限时';
+      return playCountdownVisible.value ? `${countdown.value}s` : '—';
+    }
     return '—';
   });
 
@@ -366,14 +457,7 @@ export const useGameStore = defineStore('gongzhu', () => {
     const legal = legalCards.value;
     if (legal.length === 0) return null;
     if (hintCard.value !== null && legal.includes(hintCard.value)) return hintCard.value;
-    return choosePlay({
-      hand: current.hands.S,
-      position: 'S',
-      currentTrick: current.currentTrick.plays,
-      legalCards: legal,
-      litCards: current.litCards,
-      isLastToPlay: current.currentTrick.plays.length === 3,
-    });
+    return choosePlay(playObservationFor('S', legal));
   });
 
   /* ------------------------------------------------------------------ *
@@ -383,8 +467,14 @@ export const useGameStore = defineStore('gongzhu', () => {
   function startMatch(format: MatchFormat, seed?: number): void {
     clearAllTimers();
     config.format = format;
-    config.lightSeconds = Math.max(5, Math.min(120, Math.round(config.lightSeconds || 30)));
-    config.playSeconds = Math.max(5, Math.min(120, Math.round(config.playSeconds || 20)));
+    config.lightSeconds = normalizeCountdownSeconds(
+      config.lightSeconds,
+      DEFAULT_CONFIG.lightSeconds,
+    );
+    config.playSeconds = normalizeCountdownSeconds(
+      config.playSeconds,
+      DEFAULT_CONFIG.playSeconds,
+    );
     config.dealLimit = Math.max(1, Math.min(60, Math.round(config.dealLimit || 20)));
     const matchSeed = seed ?? randomSeed();
     Object.assign(match, newMatchState(format, matchSeed));
@@ -401,7 +491,11 @@ export const useGameStore = defineStore('gongzhu', () => {
     message.value = `${format}局制开始，南北队 vs 东西队`;
     logEvent(
       'MATCH_STARTED',
-      `${format}局制开始；A队=南北，B队=东西；发牌种子 #${matchSeed}；单局上限 ${config.dealLimit} 副；亮牌 ${config.lightSeconds}s / 出牌 ${config.playSeconds}s`,
+      `${format}局制开始；A队=南北，B队=东西；发牌种子 #${matchSeed}；单局上限 ${config.dealLimit} 副；亮牌 ${
+        config.lightSeconds > 0 ? `${config.lightSeconds}s` : '不限时'
+      } / 出牌 ${config.playSeconds > 0 ? `${config.playSeconds}s` : '不限时'}；第四张自动亮${
+        config.autoLightLastOne ? '开启' : '关闭'
+      }`,
     );
     startRound(1);
   }
@@ -438,8 +532,8 @@ export const useGameStore = defineStore('gongzhu', () => {
     auditInfo.value = audit;
 
     const leader: Position =
-      round.dealsPlayed === 0 ? findCardHolder(hands, CLUB_2) : (round.lastPigCollector ?? 'S');
-    const forcedClub2 = round.dealsPlayed === 0;
+      round.dealsPlayed === 0 ? findCardHolder(hands, SPADE_3) : (round.lastPigCollector ?? 'S');
+    const openingDeal = round.dealsPlayed === 0;
 
     deal.value = {
       index: dealIndex,
@@ -447,7 +541,7 @@ export const useGameStore = defineStore('gongzhu', () => {
       hands: cloneHands(hands),
       originalHands: cloneHands(hands),
       leader,
-      forcedClub2,
+      openingDeal,
       litCards: [],
       litBy: {},
       autoLitCards: [],
@@ -476,7 +570,7 @@ export const useGameStore = defineStore('gongzhu', () => {
     logEvent(
       'DEAL_CREATED',
       `第 ${round.number} 局第 ${dealIndex} 副发牌；种子 #${seed}；${seatName(leader)}领出${
-        forcedClub2 ? '，首引必须♣2' : ''
+        openingDeal ? '（首副持♠3，首引花色不限）' : ''
       }`,
       { position: leader },
     );
@@ -501,30 +595,31 @@ export const useGameStore = defineStore('gongzhu', () => {
     phase.value = 'lighting';
     lightCountdown.value = config.lightSeconds;
 
-    // 系统推荐：开局即把推荐亮出的关键牌弹起，玩家可点击收回或改选
-    humanLightSelection.value = isAiSeat('S')
-      ? []
-      : chooseLights({
-          hand: current.hands.S,
-          position: 'S',
-          teamSmallScore: round.smallScores.A,
-          opponentSmallScore: round.smallScores.B,
-          dealIndex: current.index,
-          litCount: 0,
-        });
+    // 系统推荐：按当前激活的亮牌规则把推荐亮出的关键牌弹起，玩家可点击收回或改选
+    humanLightSelection.value = isAiSeat('S') ? [] : recommendLightsFor('S');
     message.value =
       humanLightSelection.value.length > 0
-        ? `亮牌阶段：已推荐亮出 ${humanLightSelection.value.length} 张，可点击调整后亮牌`
-        : '亮牌阶段：点击可亮的关键牌使其弹起，再点击“亮牌”公开';
+        ? `亮牌阶段：已推荐亮出 ${humanLightSelection.value.length} 张，可点击调整后亮牌${
+            config.lightSeconds > 0 ? '' : '（本局无读秒）'
+          }`
+        : `亮牌阶段：点击可亮的关键牌使其弹起，再点击“亮牌”公开${
+            config.lightSeconds > 0 ? '' : '（本局无读秒）'
+          }`;
 
     clearLightTimers();
-    lightCountdownTimer = setInterval(() => {
-      lightCountdown.value -= 1;
-      if (lightCountdown.value <= 0) {
-        clearLightCountdown();
-        finishLighting();
-      }
-    }, 1000);
+    if (config.lightSeconds > 0) {
+      lightCountdownTimer = setInterval(() => {
+        lightCountdown.value -= 1;
+        if (lightCountdown.value <= 0) {
+          clearLightCountdown();
+          // V1.0 §3.3：倒计时结束自动提交当前选择（通常为空）。
+          autoSubmitHumanLightOnTimeout();
+          finishLighting();
+          return;
+        }
+        announceLightCountdown();
+      }, 1000);
+    }
 
     scheduleAiLightSubmissions();
 
@@ -532,7 +627,29 @@ export const useGameStore = defineStore('gongzhu', () => {
     if (!current.hands.S.some((card) => isKeyCard(card))) {
       submitLight('S', []);
       message.value = '手中没有可亮的牌，已自动跳过亮牌';
+    } else {
+      announceLightCountdown();
     }
+  }
+
+  /** 亮牌最后读秒：只在南家仍需提交时语音播报 */
+  function announceLightCountdown(): void {
+    const current = deal.value;
+    if (!current || phase.value !== 'lighting') return;
+    if (current.submitted.S || isAiSeat('S')) return;
+    if (!current.hands.S.some((card) => isKeyCard(card))) return;
+    speakCountdown(lightCountdown.value);
+  }
+
+  /**
+   * 亮牌读秒结束：把南家当前选择（可能为空）作为最终提交。
+   * 若南家已提交或由 AI 托管，则不做任何事。
+   */
+  function autoSubmitHumanLightOnTimeout(): void {
+    const current = deal.value;
+    if (!current || phase.value !== 'lighting') return;
+    if (current.submitted.S || isAiSeat('S')) return;
+    submitLight('S', [...humanLightSelection.value]);
   }
 
   function scheduleAiLightSubmissions(): void {
@@ -544,15 +661,7 @@ export const useGameStore = defineStore('gongzhu', () => {
       const timer = setTimeout(() => {
         const live = deal.value;
         if (phase.value !== 'lighting' || !live || live.submitted[pos]) return;
-        const cards = chooseLights({
-          hand: live.hands[pos],
-          position: pos,
-          teamSmallScore: round.smallScores[teamOf(pos)],
-          opponentSmallScore: round.smallScores[otherTeam(teamOf(pos))],
-          dealIndex: live.index,
-          litCount: submittedLitCount.value,
-        });
-        submitLight(pos, cards);
+        submitLight(pos, recommendLightsFor(pos));
       }, delay);
       lightAiTimers.push(timer);
     });
@@ -665,8 +774,8 @@ export const useGameStore = defineStore('gongzhu', () => {
     current.nextPlayer = current.leader;
     current.currentTrick = emptyTrick(current.leader);
     settling.value = false;
-    message.value = current.forcedClub2
-      ? `首副：${seatName(current.leader)}持♣2领出，必须出♣2`
+    message.value = current.openingDeal
+      ? `首副：${seatName(current.leader)}持♠3领出，首引花色不限`
       : `${seatName(current.leader)}领出`;
     startPlayCountdown();
     scheduleAiIfNeeded();
@@ -676,11 +785,12 @@ export const useGameStore = defineStore('gongzhu', () => {
     clearPlayCountdown();
     const current = deal.value;
     if (!current || phase.value !== 'playing') return;
-    if (isAiSeat(current.nextPlayer)) {
+    if (isAiSeat(current.nextPlayer) || config.playSeconds <= 0) {
       countdown.value = 0;
       return;
     }
     countdown.value = config.playSeconds;
+    announcePlayCountdown();
     playCountdownTimer = setInterval(() => {
       countdown.value -= 1;
       if (countdown.value <= 0) {
@@ -694,8 +804,16 @@ export const useGameStore = defineStore('gongzhu', () => {
           message.value = `${seatName(pos)}超时，系统自动出牌：${cardLabel(card)}`;
           applyPlay(pos, card, { auto: true });
         }
+        return;
       }
+      announcePlayCountdown();
     }, 1000);
+  }
+
+  /** 出牌最后读秒：只在轮到南家时语音播报 */
+  function announcePlayCountdown(): void {
+    if (phase.value !== 'playing' || !isHumanTurn.value) return;
+    speakCountdown(countdown.value);
   }
 
   /** 南家只剩唯一合法牌时无需选择，短暂停留后自动打出 */
@@ -752,14 +870,7 @@ export const useGameStore = defineStore('gongzhu', () => {
         isAiThinking.value = false;
         return;
       }
-      const card = choosePlay({
-        hand: live.hands[pos],
-        position: pos,
-        currentTrick: live.currentTrick.plays,
-        legalCards: legal,
-        litCards: live.litCards,
-        isLastToPlay: live.currentTrick.plays.length === 3,
-      });
+      const card = choosePlay(playObservationFor(pos, legal));
       applyPlay(pos, card, { ai: true });
     }, config.aiDelayMs + Math.random() * 500);
   }
@@ -833,7 +944,6 @@ export const useGameStore = defineStore('gongzhu', () => {
         current.firstLedSuitStatus[leadSuit] = 'LED';
         current.currentTrick.isFirstLed = true;
       }
-      if (current.forcedClub2) current.forcedClub2 = false;
     }
 
     if (current.currentTrick.plays.length === 4) {
@@ -911,11 +1021,17 @@ export const useGameStore = defineStore('gongzhu', () => {
     settling.value = false;
     isAiThinking.value = false;
 
+    const pigLighter = current.litBy[PIG];
+    /** 亮猪者亮牌时（亮牌阶段手牌完整）手中的黑桃张数 */
+    const pigLighterSpadeCount = pigLighter
+      ? current.originalHands[pigLighter].filter((card) => getSuit(card) === 3).length
+      : undefined;
     const score: DealScore = scoreDeal({
       collected: current.collected,
       litCards: current.litCards,
       litBy: current.litBy,
       autoLitCards: current.autoLitCards,
+      pigLighterSpadeCount,
     });
     current.score = score;
     current.phase = 'scoring';
@@ -940,7 +1056,7 @@ export const useGameStore = defineStore('gongzhu', () => {
       seed: current.seed,
       roundNumber: round.number,
       leader: current.leader,
-      forcedClub2: current.index === 1,
+      openingDeal: current.openingDeal,
       litCards: [...current.litCards],
       litBy: { ...current.litBy },
       autoLitCards: [...current.autoLitCards],
@@ -1069,13 +1185,56 @@ export const useGameStore = defineStore('gongzhu', () => {
   }
 
   /* ------------------------------------------------------------------ *
+   * 亮牌规则热插拔
+   * ------------------------------------------------------------------ */
+
+  /** 管理员应用新亮牌规则：校验通过后立即热更新，并刷新当前推荐。 */
+  function applyLightRule(input: string | unknown): { ok: boolean; error?: string; version?: string } {
+    try {
+      const config: LightRuleConfig = activateLightRule(input);
+      refreshHumanLightRecommendation();
+      logEvent(
+        'LIGHT_RULE_UPDATED',
+        `亮牌规则已热更新：${config.meta.version}${config.meta.name ? `（${config.meta.name}）` : ''}`,
+      );
+      message.value = `亮牌规则已热更新至 ${config.meta.version}，后续推荐亮牌立即使用新规则`;
+      return { ok: true, version: config.meta.version };
+    } catch (error) {
+      return { ok: false, error: error instanceof Error ? error.message : String(error) };
+    }
+  }
+
+  /** 恢复内置 V1.0 亮牌规则。 */
+  function restoreDefaultLightRule(): { ok: boolean; version?: string } {
+    const config = resetLightRuleRegistry();
+    refreshHumanLightRecommendation();
+    logEvent('LIGHT_RULE_UPDATED', `亮牌规则已恢复内置默认：${config.meta.version}`);
+    message.value = `亮牌规则已恢复内置默认 ${config.meta.version}`;
+    return { ok: true, version: config.meta.version };
+  }
+
+  function exportLightRuleJson(): string {
+    return serializeLightRule(lightRuleRuntime.config);
+  }
+
+  // 规则注册表可在任意时刻被热更新；亮牌阶段尚未提交时自动刷新推荐。
+  watch(
+    () => lightRuleRuntime.config,
+    () => {
+      if (phase.value === 'lighting' && deal.value && !deal.value.submitted.S && !isAiSeat('S')) {
+        refreshHumanLightRecommendation();
+      }
+    },
+  );
+
+  /* ------------------------------------------------------------------ *
    * 辅助动作
    * ------------------------------------------------------------------ */
 
   function setAutoPilot(value: boolean): void {
     autoPilot.value = value;
     if (value && phase.value !== 'idle') {
-      logEvent('AI_TAKEOVER_STARTED', '南家开启托管，由基础策略 AI 接管；AI 与真人使用同一公开信息边界');
+      logEvent('AI_TAKEOVER_STARTED', '南家开启托管，由概率团队策略 AI 接管；AI 与真人使用同一公开信息边界');
     }
     if (phase.value === 'lighting') {
       // 托管状态变化后，取消旧的 AI 亮牌定时器，按新座位归属重新安排
@@ -1084,15 +1243,7 @@ export const useGameStore = defineStore('gongzhu', () => {
       scheduleAiLightSubmissions();
       const current = deal.value;
       if (value && current && !current.submitted.S) {
-        const cards = chooseLights({
-          hand: current.hands.S,
-          position: 'S',
-          teamSmallScore: round.smallScores.A,
-          opponentSmallScore: round.smallScores.B,
-          dealIndex: current.index,
-          litCount: submittedLitCount.value,
-        });
-        submitLight('S', cards);
+        submitLight('S', recommendLightsFor('S'));
       }
     }
     if (phase.value === 'playing') {
@@ -1109,14 +1260,7 @@ export const useGameStore = defineStore('gongzhu', () => {
     if (!current || !isHumanTurn.value) return;
     const legal = legalCardsFor('S');
     if (legal.length === 0) return;
-    hintCard.value = choosePlay({
-      hand: current.hands.S,
-      position: 'S',
-      currentTrick: current.currentTrick.plays,
-      legalCards: legal,
-      litCards: current.litCards,
-      isLastToPlay: current.currentTrick.plays.length === 3,
-    });
+    hintCard.value = choosePlay(playObservationFor('S', legal));
   }
 
   function clearHint(): void {
@@ -1234,12 +1378,15 @@ export const useGameStore = defineStore('gongzhu', () => {
     auditInfo,
     events,
     dealHistory,
+    lightRuleRuntime,
 
     // computed
     humanSubmittedLight,
     canHumanPlay,
     legalCards,
     isHumanTurn,
+    lightCountdownVisible,
+    playCountdownVisible,
     dealResultVisible,
     dealResultOpen,
     matchResultVisible,
@@ -1271,6 +1418,9 @@ export const useGameStore = defineStore('gongzhu', () => {
     setAutoPilot,
     requestHint,
     clearHint,
+    applyLightRule,
+    restoreDefaultLightRule,
+    exportLightRuleJson,
 
     // helpers
     isAiSeat,

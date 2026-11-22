@@ -1,13 +1,14 @@
 <script setup lang="ts">
 import { computed } from 'vue';
 import { useGameStore } from '../store/game';
-import { KEY_CARD_NAMES, PIG, SHEEP, TRANSFORMER, getSuit, isScoringCard } from '../models/card';
+import { HEART_A, KEY_CARD_NAMES, KEY_CARD_SHORT, KEY_CARDS, PIG, SHEEP, TRANSFORMER, getSuit, isScoringCard } from '../models/card';
 import {
   ALL_POSITIONS,
   endReasonText,
   formatSigned,
   otherTeam,
   resultText,
+  scoreSignClass,
   seatName,
   teamName,
   teamOf,
@@ -19,6 +20,7 @@ import {
 import { collectedSummary } from '../core/scoring';
 import { resolveMatch } from '../core/rules';
 import Hand from './Hand.vue';
+import PlayingCard from './PlayingCard.vue';
 
 const store = useGameStore();
 
@@ -26,9 +28,6 @@ const positions: Position[] = ALL_POSITIONS;
 
 const score = computed(() => store.deal?.score ?? null);
 const result = computed(() => store.round.result);
-
-const teamA = computed(() => score.value?.teamScores.A ?? 0);
-const teamB = computed(() => score.value?.teamScores.B ?? 0);
 
 const TEAMS: Team[] = ['A', 'B'];
 /** 每队两名选手：A队=南、北；B队=东、西 */
@@ -48,6 +47,19 @@ function teamDealScore(team: Team): number {
     0,
   );
 }
+
+/** 本副四张关键牌的亮牌状态：结算页用牌面 + 亮牌者醒目展示 */
+function isLit(card: number): boolean {
+  return score.value?.litCards.includes(card) ?? false;
+}
+function isAutoLit(card: number): boolean {
+  return score.value?.autoLitCards.includes(card) ?? false;
+}
+function litSeat(card: number): string {
+  const pos = score.value?.litBy[card];
+  return pos ? seatName(pos) : '';
+}
+const litCount = computed(() => score.value?.litCards.length ?? 0);
 
 const slamSeat = computed(() => (score.value?.slam.position ? seatName(score.value.slam.position) : ''));
 const slamTeam = computed(() => (score.value?.slam.team ? teamName(score.value.slam.team) : ''));
@@ -86,8 +98,29 @@ function isPigRow(pos: Position): boolean {
 function isSheepRow(pos: Position): boolean {
   return score.value?.breakdowns[pos].collected.includes(SHEEP) ?? false;
 }
+/** 明细里展示“累计后”的分数，而不是单次调整量：亮猪 -200、窝猪 -400 */
+function pigLitScore(pos: Position): number {
+  const breakdown = score.value?.breakdowns[pos];
+  return breakdown ? breakdown.pigBase + breakdown.pigLitAdj : 0;
+}
+function pigOwnScore(pos: Position): number {
+  const breakdown = score.value?.breakdowns[pos];
+  return breakdown ? breakdown.pigBase + breakdown.pigLitAdj + breakdown.ownPigAdj : 0;
+}
+function sheepLitScore(pos: Position): number {
+  const breakdown = score.value?.breakdowns[pos];
+  return breakdown ? breakdown.sheepBase + breakdown.sheepLitAdj : 0;
+}
 function isTransformerRow(pos: Position): boolean {
   return score.value?.breakdowns[pos].hasTransformer ?? false;
+}
+/** 变压器明细直接展示“修正后总分 × 倍数 = 最终分”，不再单列“变压器之前”的小计 */
+function transformerDetail(pos: Position): string {
+  const breakdown = score.value?.breakdowns[pos];
+  if (!breakdown) return '';
+  if (breakdown.transformerSolo) return `独拿 ${formatSigned(breakdown.final)}`;
+  const multiplier = breakdown.transformerLit ? 4 : 2;
+  return `${formatSigned(breakdown.subtotal)} × ${multiplier} = ${formatSigned(breakdown.final)}`;
 }
 function hasHearts(pos: Position): boolean {
   return score.value?.breakdowns[pos].collected.some((card) => getSuit(card) === 2) ?? false;
@@ -131,12 +164,24 @@ function resultClass(): string {
         </div>
         <div class="dr-team-scores">
           <div class="dr-team a">
-            <span class="dr-team-name">A队 · 南北</span>
-            <span class="dr-team-score">{{ formatSigned(teamA) }}</span>
+            <span class="dr-team-name">A队 · 南北 · 本局总分（含本副）</span>
+            <span class="dr-team-score" :class="scoreSignClass(teamRoundScore('A'))">
+              {{ formatSigned(teamRoundScore('A')) }}
+            </span>
+            <span class="dr-team-delta">
+              本副
+              <span :class="scoreSignClass(teamDealScore('A'))">{{ formatSigned(teamDealScore('A')) }}</span>
+            </span>
           </div>
           <div class="dr-team b">
-            <span class="dr-team-name">B队 · 东西</span>
-            <span class="dr-team-score">{{ formatSigned(teamB) }}</span>
+            <span class="dr-team-name">B队 · 东西 · 本局总分（含本副）</span>
+            <span class="dr-team-score" :class="scoreSignClass(teamRoundScore('B'))">
+              {{ formatSigned(teamRoundScore('B')) }}
+            </span>
+            <span class="dr-team-delta">
+              本副
+              <span :class="scoreSignClass(teamDealScore('B'))">{{ formatSigned(teamDealScore('B')) }}</span>
+            </span>
           </div>
         </div>
       </div>
@@ -163,7 +208,32 @@ function resultClass(): string {
         <div class="slam-text"><strong>满贯触发</strong><span>本副普通分不参与小分累计。</span></div>
       </div>
 
-      <!-- 南北队（左栏） / 东西队（右栏）分数 -->
+      <!-- 本副亮牌：醒目展示四张关键牌谁亮/未亮 -->
+      <div class="dr-section-title">
+        本副亮牌
+        <span class="dl-count">{{ litCount }}/4</span>
+        <span v-if="score.slam.allKeyCardsLit" class="tag tag-gold mini">全亮</span>
+      </div>
+      <div class="deal-lights">
+        <div
+          v-for="card in KEY_CARDS"
+          :key="`dl-${card}`"
+          class="dl-item"
+          :class="{ lit: isLit(card), auto: isAutoLit(card) }"
+        >
+          <PlayingCard :card="card" size="md" />
+          <div class="dl-meta">
+            <span class="dl-name">{{ KEY_CARD_SHORT[card] }} · {{ KEY_CARD_NAMES[card] }}</span>
+            <span v-if="isLit(card)" class="dl-seat">{{ litSeat(card) }} 亮</span>
+            <span v-else class="dl-unlit">未亮</span>
+            <span v-if="card === HEART_A && isLit(card)" class="dl-effect">全场红桃 ×2</span>
+            <span v-if="isAutoLit(card)" class="dl-auto">自动</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- 南北队（左栏） / 东西队（右栏）分数：只保留座位与本副分数 -->
+      <div class="dr-section-title">本副各选手得分</div>
       <div class="team-summary">
         <div
           v-for="team in TEAMS"
@@ -176,28 +246,106 @@ function resultClass(): string {
             <span class="tag" :class="team === 'A' ? 'tag-green' : 'tag-gold'">{{ teamShort(team) }}</span>
           </div>
 
-          <div class="ts-row ts-round">
-            <span class="ts-label">
-              本局各副牌累积总得分
-              <span class="ts-include">含本副</span>
-            </span>
-            <span class="ts-value" :class="{ neg: teamRoundScore(team) < 0 }">
-              {{ formatSigned(teamRoundScore(team)) }}
-            </span>
-          </div>
-
           <div v-for="pos in teamPositions(team)" :key="`ts-${team}-${pos}`" class="ts-row">
-            <span class="ts-label">{{ seatName(pos) }}本副得分</span>
-            <span class="ts-value" :class="{ neg: score.breakdowns[pos].final < 0 }">
+            <span class="ts-label">{{ seatName(pos) }}</span>
+            <span class="ts-value" :class="scoreSignClass(score.breakdowns[pos].final)">
               {{ formatSigned(score.breakdowns[pos].final) }}
             </span>
           </div>
+        </div>
+      </div>
 
-          <div class="ts-row ts-sum">
-            <span class="ts-label">{{ teamShort(team) }}两选手本副得分总和</span>
-            <span class="ts-value" :class="{ neg: teamDealScore(team) < 0 }">
+      <!-- 四人计分明细：南北队左栏、东西队右栏 -->
+      <div class="dr-section-title">个人计分明细（红桃 / 羊 / 猪 / 变压器）</div>
+      <div class="bd-grid">
+        <div
+          v-for="team in TEAMS"
+          :key="`bd-col-${team}`"
+          class="bd-col"
+          :class="`team-${team.toLowerCase()}`"
+        >
+          <div class="bd-col-head">
+            <span class="bd-col-team">{{ teamName(team) }}计分明细</span>
+            <span class="bd-col-score" :class="scoreSignClass(teamDealScore(team))">
               {{ formatSigned(teamDealScore(team)) }}
             </span>
+          </div>
+
+          <div
+            v-for="pos in teamPositions(team)"
+            :key="`bd-${pos}`"
+            class="bd-card"
+            :class="`team-${teamOf(pos).toLowerCase()}`"
+          >
+            <div class="bd-head">
+              <div>
+                <span class="bd-seat">{{ seatName(pos) }}</span>
+                <span class="tag" :class="teamOf(pos) === 'A' ? 'tag-green' : 'tag-gold'">{{ teamShort(teamOf(pos)) }}</span>
+              </div>
+              <span class="bd-final" :class="scoreSignClass(score.breakdowns[pos].final)">
+                {{ formatSigned(score.breakdowns[pos].final) }}
+              </span>
+            </div>
+
+            <div class="bd-tags">
+              <span v-if="summary(pos).pig" class="tag tag-red">猪</span>
+              <span v-if="summary(pos).sheep" class="tag tag-gold">羊</span>
+              <span v-if="summary(pos).transformer" class="tag tag-dark">变压器</span>
+              <span v-if="summary(pos).hearts > 0" class="tag tag-gray">红桃 {{ summary(pos).hearts }}</span>
+              <span v-if="summary(pos).allRed" class="tag tag-gold">全红</span>
+              <span v-if="score.breakdowns[pos].ownPigExempt" class="tag tag-green">免窝猪</span>
+              <span v-if="score.breakdowns[pos].transformerSolo" class="tag tag-green">独拿变压器</span>
+            </div>
+
+            <div class="bd-rows">
+              <div v-if="hasHearts(pos)" class="bd-row">
+                <span class="bd-label">红桃</span>
+                <span class="bd-detail">
+                  {{ score.breakdowns[pos].heartsBase }}
+                  <template v-if="score.breakdowns[pos].heartALit"> · 亮♥A 全场×2</template>
+                  <template v-if="score.breakdowns[pos].allRed"> · 全红反转</template>
+                </span>
+                <span class="bd-value" :class="scoreSignClass(score.breakdowns[pos].heartsTotal)">
+                  {{ score.breakdowns[pos].heartsTotal }}
+                </span>
+              </div>
+              <div v-if="isSheepRow(pos)" class="bd-row">
+                <span class="bd-label">羊</span>
+                <span class="bd-detail">
+                  {{ score.breakdowns[pos].sheepBase }}
+                  <template v-if="score.breakdowns[pos].sheepLitAdj"> 亮羊 {{ formatSigned(sheepLitScore(pos)) }}</template>
+                </span>
+                <span class="bd-value" :class="scoreSignClass(score.breakdowns[pos].sheepTotal)">
+                  {{ score.breakdowns[pos].sheepTotal }}
+                </span>
+              </div>
+              <div v-if="isPigRow(pos)" class="bd-row">
+                <span class="bd-label">猪</span>
+                <span class="bd-detail">
+                  {{ score.breakdowns[pos].pigBase }}
+                  <template v-if="score.breakdowns[pos].pigLitAdj"> 亮猪 {{ formatSigned(pigLitScore(pos)) }}</template>
+                  <template v-if="score.breakdowns[pos].ownPigAdj"> 窝猪 {{ formatSigned(pigOwnScore(pos)) }}</template>
+                </span>
+                <span class="bd-value" :class="scoreSignClass(score.breakdowns[pos].pigTotal)">
+                  {{ score.breakdowns[pos].pigTotal }}
+                </span>
+              </div>
+              <div v-if="isTransformerRow(pos)" class="bd-row transformer-row">
+                <span class="bd-label">变压器</span>
+                <span class="bd-detail">{{ transformerDetail(pos) }}</span>
+                <span class="bd-value" :class="scoreSignClass(score.breakdowns[pos].transformerAdj)">
+                  {{ formatSigned(score.breakdowns[pos].transformerAdj) }}
+                </span>
+              </div>
+            </div>
+
+            <div class="bd-collected">
+              <Hand :cards="collectedCards(pos)" :position="pos" compact />
+            </div>
+
+            <ul v-if="score.breakdowns[pos].notes.length" class="bd-notes">
+              <li v-for="(note, index) in score.breakdowns[pos].notes" :key="index">{{ note }}</li>
+            </ul>
           </div>
         </div>
       </div>
@@ -215,99 +363,6 @@ function resultClass(): string {
             <span v-if="score.slam.allKeyCardsLit" class="tag tag-gold mini">全亮</span>
             <span v-if="score.autoLitCards.length" class="tag tag-gray mini">含自动亮</span>
           </span>
-        </div>
-      </div>
-
-      <!-- 四人计分明细：南北队左栏、东西队右栏 -->
-      <div class="bd-grid">
-        <div
-          v-for="team in TEAMS"
-          :key="`bd-col-${team}`"
-          class="bd-col"
-          :class="`team-${team.toLowerCase()}`"
-        >
-          <div class="bd-col-head">
-            <span class="bd-col-team">{{ teamName(team) }}计分明细</span>
-            <span class="bd-col-score" :class="{ neg: teamDealScore(team) < 0 }">
-              {{ formatSigned(teamDealScore(team)) }}
-            </span>
-          </div>
-
-          <div
-            v-for="pos in teamPositions(team)"
-            :key="`bd-${pos}`"
-            class="bd-card"
-            :class="`team-${teamOf(pos).toLowerCase()}`"
-          >
-            <div class="bd-head">
-              <div>
-                <span class="bd-seat">{{ seatName(pos) }}</span>
-                <span class="tag" :class="teamOf(pos) === 'A' ? 'tag-green' : 'tag-gold'">{{ teamShort(teamOf(pos)) }}</span>
-              </div>
-              <span class="bd-final" :class="{ neg: score.breakdowns[pos].final < 0 }">
-                {{ formatSigned(score.breakdowns[pos].final) }}
-              </span>
-            </div>
-
-            <div class="bd-tags">
-              <span v-if="summary(pos).pig" class="tag tag-red">猪</span>
-              <span v-if="summary(pos).sheep" class="tag tag-gold">羊</span>
-              <span v-if="summary(pos).transformer" class="tag tag-dark">变压器</span>
-              <span v-if="summary(pos).hearts > 0" class="tag tag-gray">红桃 {{ summary(pos).hearts }}</span>
-              <span v-if="summary(pos).allRed" class="tag tag-gold">全红</span>
-              <span v-if="score.breakdowns[pos].transformerSolo" class="tag tag-green">独拿变压器</span>
-            </div>
-
-            <div class="bd-rows">
-              <div v-if="isPigRow(pos)" class="bd-row">
-                <span class="bd-label">猪</span>
-                <span class="bd-detail">
-                  {{ score.breakdowns[pos].pigBase }}
-                  <template v-if="score.breakdowns[pos].pigLitAdj"> 亮猪 {{ score.breakdowns[pos].pigLitAdj }}</template>
-                  <template v-if="score.breakdowns[pos].ownPigAdj"> 窝猪 {{ score.breakdowns[pos].ownPigAdj }}</template>
-                </span>
-                <span class="bd-value">{{ score.breakdowns[pos].pigTotal }}</span>
-              </div>
-              <div v-if="isSheepRow(pos)" class="bd-row">
-                <span class="bd-label">羊</span>
-                <span class="bd-detail">
-                  {{ score.breakdowns[pos].sheepBase }}
-                  <template v-if="score.breakdowns[pos].sheepLitAdj"> 亮羊 {{ score.breakdowns[pos].sheepLitAdj }}</template>
-                </span>
-                <span class="bd-value">{{ score.breakdowns[pos].sheepTotal }}</span>
-              </div>
-              <div v-if="hasHearts(pos)" class="bd-row">
-                <span class="bd-label">红桃</span>
-                <span class="bd-detail">
-                  {{ score.breakdowns[pos].heartsBase }}
-                  <template v-if="score.breakdowns[pos].heartALit"> · 亮♥A ×2</template>
-                  <template v-if="score.breakdowns[pos].allRed"> · 全红反转</template>
-                </span>
-                <span class="bd-value">{{ score.breakdowns[pos].heartsTotal }}</span>
-              </div>
-              <div class="bd-row subtotal">
-                <span class="bd-label">小计</span>
-                <span class="bd-detail">变压器之前</span>
-                <span class="bd-value">{{ score.breakdowns[pos].subtotal }}</span>
-              </div>
-              <div v-if="isTransformerRow(pos)" class="bd-row">
-                <span class="bd-label">变压器</span>
-                <span class="bd-detail">
-                  {{ score.breakdowns[pos].transformerSolo ? '独拿' : '非独拿' }}
-                  <template v-if="score.breakdowns[pos].transformerLit"> · 亮变</template>
-                </span>
-                <span class="bd-value">{{ score.breakdowns[pos].transformerAdj }}</span>
-              </div>
-            </div>
-
-            <div class="bd-collected">
-              <Hand :cards="collectedCards(pos)" :position="pos" compact />
-            </div>
-
-            <ul v-if="score.breakdowns[pos].notes.length" class="bd-notes">
-              <li v-for="(note, index) in score.breakdowns[pos].notes" :key="index">{{ note }}</li>
-            </ul>
-          </div>
         </div>
       </div>
 
@@ -401,10 +456,15 @@ function resultClass(): string {
   font-weight: 700;
 }
 .dr-team-score {
-  color: #1d3b2a;
   font-size: 22px;
   font-weight: 800;
   line-height: 1.1;
+}
+.dr-team-delta {
+  margin-top: 8px;
+  color: #7a8a80;
+  font-size: 10px;
+  font-weight: 700;
 }
 
 .dr-body {
@@ -451,6 +511,92 @@ function resultClass(): string {
   font-size: 14px;
 }
 
+.dr-section-title {
+  margin: 2px 0 -4px;
+  color: #5a6a60;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+}
+.dl-count {
+  margin-left: 4px;
+  color: #8a7b4a;
+  font-size: 11px;
+}
+
+/* 本副亮牌：四张关键牌的亮/未亮状态 */
+.deal-lights {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+.dl-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: #f1f4ee;
+  border: 1px solid #d9e2d6;
+  opacity: 0.62;
+}
+.dl-item.lit {
+  opacity: 1;
+  background: linear-gradient(120deg, #fff9e6, #fff3c9);
+  border-color: #e5bf52;
+  box-shadow:
+    0 0 0 1px rgba(229, 191, 82, 0.35),
+    0 4px 10px rgba(160, 120, 20, 0.12);
+}
+.dl-item.lit :deep(.playing-card) {
+  box-shadow:
+    0 0 0 2px rgba(255, 214, 102, 0.95),
+    0 0 12px rgba(255, 214, 102, 0.5);
+}
+.dl-item:not(.lit) :deep(.playing-card) {
+  filter: grayscale(0.85) brightness(0.9);
+}
+.dl-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.dl-name {
+  color: #23382c;
+  font-size: 11px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+.dl-item:not(.lit) .dl-name {
+  color: #7a8a80;
+}
+.dl-seat {
+  color: #8a6a00;
+  font-size: 11px;
+  font-weight: 800;
+}
+.dl-unlit {
+  color: #9aa89f;
+  font-size: 11px;
+  font-weight: 700;
+}
+.dl-effect {
+  color: #b83232;
+  font-size: 10px;
+  font-weight: 800;
+}
+.dl-auto {
+  align-self: flex-start;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: #e8dfc4;
+  color: #7a5a00;
+  font-size: 9px;
+  font-weight: 800;
+}
+
 /* 南北队（左栏） / 东西队（右栏）分数 */
 .team-summary {
   display: grid;
@@ -492,52 +638,20 @@ function resultClass(): string {
   align-items: baseline;
   justify-content: space-between;
   gap: 10px;
-  padding: 2px 0;
+  padding: 3px 0;
   color: #4f6057;
   font-size: 12px;
 }
 .ts-label {
   min-width: 0;
+  color: #23382c;
+  font-size: 14px;
+  font-weight: 700;
 }
 .ts-value {
   flex: none;
-  color: #1d6b45;
-  font-size: 15px;
-  font-weight: 800;
-}
-.ts-value.neg {
-  color: #b83232;
-}
-.ts-round {
-  margin-top: 2px;
-  padding: 4px 0 6px;
-  border-bottom: 1px dashed #e1e8de;
-}
-.ts-round .ts-label {
-  color: #3a4a40;
-  font-weight: 700;
-}
-.ts-include {
-  margin-left: 4px;
-  padding: 0 4px;
-  border-radius: 999px;
-  background: #eaf1e6;
-  color: #5c7566;
-  font-size: 9px;
-  font-weight: 700;
-}
-.ts-round .ts-value {
-  font-size: 20px;
-}
-.ts-sum {
-  margin-top: 2px;
-  padding-top: 5px;
-  border-top: 1px dashed #d5ded2;
-  color: #2d4638;
-  font-weight: 700;
-}
-.ts-sum .ts-value {
   font-size: 17px;
+  font-weight: 800;
 }
 
 .score-strip {
@@ -603,13 +717,9 @@ function resultClass(): string {
   font-weight: 800;
 }
 .bd-final {
-  color: #1d6b45;
   font-size: 24px;
   font-weight: 900;
   line-height: 1;
-}
-.bd-final.neg {
-  color: #b83232;
 }
 .bd-tags {
   display: flex;
@@ -629,7 +739,7 @@ function resultClass(): string {
   font-size: 11px;
   color: #4f6057;
 }
-.bd-row.subtotal {
+.bd-row.transformer-row {
   padding-top: 2px;
   border-top: 1px dashed #d5ded2;
   color: #2d4638;
@@ -647,7 +757,6 @@ function resultClass(): string {
 }
 .bd-value {
   font-weight: 800;
-  color: #23382c;
 }
 .bd-collected {
   padding: 4px 0;
@@ -755,6 +864,9 @@ function resultClass(): string {
   }
   .team-summary {
     grid-template-columns: minmax(0, 1fr);
+  }
+  .deal-lights {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
   .bd-grid {
     grid-template-columns: minmax(0, 1fr);

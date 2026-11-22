@@ -53,8 +53,10 @@ export const SHEEP = getCard(1, 9);
 export const TRANSFORMER = getCard(0, 8);
 /** ♥A 红桃A */
 export const HEART_A = getCard(2, 12);
-/** ♣2 首副牌强制领出 */
+/** ♣2（保留常量，供通用牌面逻辑使用；不再作为首副强制首引） */
 export const CLUB_2 = getCard(0, 0);
+/** ♠3 首副领出标记牌：每局第一副由持 ♠3 者领出，首引花色不限 */
+export const SPADE_3 = getCard(3, 1);
 
 /** 四张可亮牌（展示顺序：猪、羊、变压器、红桃A） */
 export const KEY_CARDS = [PIG, SHEEP, TRANSFORMER, HEART_A] as const;

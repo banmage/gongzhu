@@ -2,7 +2,7 @@
 import { computed, ref, watch } from 'vue';
 import { useGameStore } from '../store/game';
 import { KEY_CARD_NAMES, isKeyCard } from '../models/card';
-import { seatName, teamOf, teamShort, type Position } from '../models/game';
+import { scoreSignClass, seatName, teamOf, teamShort, type Position } from '../models/game';
 import Hand from './Hand.vue';
 import PlayingCard from './PlayingCard.vue';
 import CollectedArea from './CollectedArea.vue';
@@ -37,14 +37,8 @@ const showActionBar = computed(
   () => isLighting.value && !store.humanSubmittedLight && humanCanLight.value,
 );
 
-/** 亮牌读秒只在南家尚未提交、且手中确实有可亮牌时显示 */
-const showLightCountdown = computed(
-  () =>
-    isLighting.value &&
-    !store.autoPilot &&
-    !store.humanSubmittedLight &&
-    humanCanLight.value,
-);
+/** 亮牌读秒只在最后读秒区间、南家尚未提交且手中有可亮牌时显示 */
+const showLightCountdown = computed(() => store.lightCountdownVisible);
 
 /** 已经打出的亮牌（不再在任何手牌中）用于半透明展示 */
 function playedLit(cards: number[]): number[] {
@@ -109,6 +103,13 @@ function visibleLit(pos: Position): number[] {
   return store.seatLitCards(pos);
 }
 
+/** 该座位被系统自动亮出的关键牌（揭晓前不公开，因此亮牌阶段不标记） */
+function seatAutoLit(pos: Position): number[] {
+  const current = store.deal;
+  if (!current || isLighting.value) return [];
+  return current.autoLitCards.filter((card) => current.litBy[card] === pos);
+}
+
 const northLit = computed(() => visibleLit('N'));
 const eastLit = computed(() => visibleLit('E'));
 const westLit = computed(() => visibleLit('W'));
@@ -152,7 +153,12 @@ const teamScoreText = computed(() => ({
         <span class="team-chip a">A队</span>
         <span v-if="isLighting || isDealing" class="seat-status">{{ store.seatStatus('N') }}</span>
       </div>
-      <LitArea v-if="northLit.length > 0" :cards="northLit" :played-cards="playedLit(northLit)" />
+      <LitArea
+        v-if="northLit.length > 0"
+        :cards="northLit"
+        :played-cards="playedLit(northLit)"
+        :auto-cards="seatAutoLit('N')"
+      />
       <span v-else-if="isLighting && seatLightHint('N')" class="lit-note">
         {{ seatLightHint('N') }}
       </span>
@@ -188,8 +194,12 @@ const teamScoreText = computed(() => ({
       <div class="info-row">
         <span class="info-label">小分</span>
         <span class="info-value score-line">
-          <span class="team-a">A {{ teamScoreText.A }}</span>
-          <span class="team-b">B {{ teamScoreText.B }}</span>
+          <span class="team-a">
+            A <span :class="scoreSignClass(store.round.smallScores.A)">{{ teamScoreText.A }}</span>
+          </span>
+          <span class="team-b">
+            B <span :class="scoreSignClass(store.round.smallScores.B)">{{ teamScoreText.B }}</span>
+          </span>
         </span>
       </div>
       <div class="info-row">
@@ -229,7 +239,12 @@ const teamScoreText = computed(() => ({
         <span class="team-chip b">B队</span>
         <span v-if="isLighting || isDealing" class="seat-status">{{ store.seatStatus('W') }}</span>
       </div>
-      <LitArea v-if="westLit.length > 0" :cards="westLit" :played-cards="playedLit(westLit)" />
+      <LitArea
+        v-if="westLit.length > 0"
+        :cards="westLit"
+        :played-cards="playedLit(westLit)"
+        :auto-cards="seatAutoLit('W')"
+      />
       <span v-else-if="isLighting && seatLightHint('W')" class="lit-note">
         {{ seatLightHint('W') }}
       </span>
@@ -281,7 +296,22 @@ const teamScoreText = computed(() => ({
       <!-- 亮牌阶段 -->
       <div v-else-if="isLighting" class="lighting-center">
         <div class="phase-kicker">LIGHTING · 亮牌</div>
+        <!-- 亮牌阶段也让玩家随时看到两队本局总分（已结算各副累计） -->
+        <div class="light-team-scores" aria-label="两队本局总分">
+          <div class="lts-item team-a">
+            <span class="lts-name">南北队 · A</span>
+            <span class="lts-value" :class="scoreSignClass(store.round.smallScores.A)">{{ teamScoreText.A }}</span>
+          </div>
+          <div class="lts-item team-b">
+            <span class="lts-name">东西队 · B</span>
+            <span class="lts-value" :class="scoreSignClass(store.round.smallScores.B)">{{ teamScoreText.B }}</span>
+          </div>
+          <div class="lts-note">
+            本局总分 · 已结算 {{ store.round.dealsPlayed }} 副
+          </div>
+        </div>
         <div class="light-submit-count">已提交 {{ store.submittedSeatCount }}/4 家</div>
+        <div v-if="store.config.lightSeconds <= 0" class="light-time-note">本局亮牌不限时</div>
         <div class="light-seat-grid">
           <div
             v-for="pos in (['S', 'E', 'N', 'W'] as Position[])"
@@ -351,7 +381,12 @@ const teamScoreText = computed(() => ({
         <span class="team-chip b">B队</span>
         <span v-if="isLighting || isDealing" class="seat-status">{{ store.seatStatus('E') }}</span>
       </div>
-      <LitArea v-if="eastLit.length > 0" :cards="eastLit" :played-cards="playedLit(eastLit)" />
+      <LitArea
+        v-if="eastLit.length > 0"
+        :cards="eastLit"
+        :played-cards="playedLit(eastLit)"
+        :auto-cards="seatAutoLit('E')"
+      />
       <span v-else-if="isLighting && seatLightHint('E')" class="lit-note">
         {{ seatLightHint('E') }}
       </span>
@@ -376,6 +411,7 @@ const teamScoreText = computed(() => ({
           v-if="southDisplayLit.length > 0"
           :cards="southDisplayLit"
           :played-cards="playedLit(southDisplayLit)"
+          :auto-cards="seatAutoLit('S')"
           variant="column"
         />
       </div>
@@ -435,6 +471,10 @@ const teamScoreText = computed(() => ({
 <style scoped>
 .table {
   --table-pad: 14px;
+  /* 与结算页统一：正分红、负分深绿、零分中性色 */
+  --score-positive: #c0392b;
+  --score-negative: #1d6b45;
+  --score-zero: #6b7a70;
   position: relative;
   display: grid;
   grid-template-areas:
@@ -807,11 +847,14 @@ const teamScoreText = computed(() => ({
   flex: none;
   min-width: 30px;
   text-align: right;
-  color: #9ef0bd;
+  color: var(--score-positive);
   font-weight: 800;
 }
-.collect-points.neg {
-  color: #ff9b8c;
+.collect-points.score-neg {
+  color: var(--score-negative);
+}
+.collect-points.score-zero {
+  color: var(--score-zero);
 }
 .collect-count {
   flex: none;
@@ -912,9 +955,59 @@ const teamScoreText = computed(() => ({
   font-size: 22px;
   margin-left: 2px;
 }
+.light-team-scores {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+  width: 100%;
+  max-width: 300px;
+}
+.lts-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+  padding: 5px 8px;
+  border-radius: 7px;
+  border: 1px solid rgba(255, 255, 255, 0.42);
+  /* 浅色底让深绿/深红分值保持与结算页一致的清晰度 */
+  background: rgba(247, 247, 242, 0.94);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+}
+.lts-item.team-a {
+  border-top: 2px solid #6fd39c;
+}
+.lts-item.team-b {
+  border-top: 2px solid #e0ad63;
+}
+.lts-name {
+  color: #5c6c62;
+  font-size: 10px;
+  font-weight: 700;
+}
+.lts-value {
+  font-size: 20px;
+  font-weight: 900;
+  line-height: 1.05;
+}
+.lts-note {
+  grid-column: 1 / -1;
+  color: rgba(234, 245, 238, 0.55);
+  font-size: 10px;
+  text-align: center;
+}
 .light-submit-count {
   color: #eaf5ee;
   font-size: 13px;
+  font-weight: 700;
+}
+.light-time-note {
+  padding: 2px 9px;
+  border-radius: 999px;
+  background: rgba(255, 214, 102, 0.16);
+  border: 1px solid rgba(255, 214, 102, 0.4);
+  color: #ffe19a;
+  font-size: 11px;
   font-weight: 700;
 }
 .light-seat-grid {
@@ -1038,29 +1131,39 @@ const teamScoreText = computed(() => ({
 }
 .trick-stack {
   position: relative;
-  width: 250px;
-  height: 250px;
+  width: 280px;
+  height: 280px;
 }
 .trick-slot {
   position: absolute;
   top: 50%;
   left: 50%;
-  width: 96px;
-  height: 134px;
+  width: 108px;
+  height: 151px;
   line-height: 0;
   transform: translate(-50%, -50%);
 }
+/* 中央出牌与手牌同步放大，四家牌面更容易区分 */
+.trick-slot :deep(.playing-card) {
+  --pc-label-size: 23px;
+  --pc-corner-size: 19px;
+  --pc-pip-size: 24px;
+  --pc-court-size: 58px;
+  --pc-back-spade-size: 38px;
+  width: 108px;
+  height: 151px;
+}
 .trick-slot.slot-W {
-  transform: translate(calc(-50% - 66px), -50%);
+  transform: translate(calc(-50% - 74px), -50%);
 }
 .trick-slot.slot-E {
-  transform: translate(calc(-50% + 66px), -50%);
+  transform: translate(calc(-50% + 74px), -50%);
 }
 .trick-slot.slot-N {
-  transform: translate(-50%, calc(-50% - 50px));
+  transform: translate(-50%, calc(-50% - 56px));
 }
 .trick-slot.slot-S {
-  transform: translate(-50%, calc(-50% + 50px));
+  transform: translate(-50%, calc(-50% + 56px));
 }
 .trick-slot.winner :deep(.playing-card) {
   outline: 3px solid #ffe19a;
@@ -1137,12 +1240,15 @@ const teamScoreText = computed(() => ({
   padding: 1px 7px;
   border-radius: 999px;
   background: rgba(0, 0, 0, 0.3);
-  color: #9ef0bd;
+  color: var(--score-positive);
   font-size: 11px;
   font-weight: 800;
 }
-.trick-points.neg {
-  color: #ff9b8c;
+.trick-points.score-neg {
+  color: var(--score-negative);
+}
+.trick-points.score-zero {
+  color: var(--score-zero);
 }
 .trick-winner-text {
   color: rgba(234, 245, 238, 0.8);
@@ -1311,8 +1417,8 @@ const teamScoreText = computed(() => ({
     display: none;
   }
   .trick-stack {
-    width: 230px;
-    height: 230px;
+    width: 250px;
+    height: 250px;
   }
   .action-bar {
     width: 100%;
@@ -1326,48 +1432,37 @@ const teamScoreText = computed(() => ({
     grid-template-rows: auto minmax(220px, 1fr) auto;
     gap: 4px 10px;
   }
-  :deep(.hand) {
-    --hand-card-w: 84px;
-    --hand-card-h: 116px;
-    --hand-card-step: 20px;
-    --hand-card-radius: 8px;
-    --hand-label-size: 20px;
-    --hand-corner-size: 15px;
-    --hand-pip-size: 18px;
-    --hand-court-size: 44px;
-    --hand-back-spade-size: 29px;
-  }
   .seat-profile {
     font-size: 12px;
   }
   .trick-stack {
-    width: 210px;
-    height: 210px;
+    width: 236px;
+    height: 236px;
   }
   .trick-slot {
-    width: 80px;
-    height: 112px;
+    width: 92px;
+    height: 129px;
   }
   .trick-slot :deep(.playing-card) {
-    --pc-label-size: 17px;
-    --pc-corner-size: 13px;
-    --pc-pip-size: 17px;
-    --pc-court-size: 42px;
-    --pc-back-spade-size: 27px;
-    width: 80px;
-    height: 112px;
+    --pc-label-size: 20px;
+    --pc-corner-size: 15px;
+    --pc-pip-size: 20px;
+    --pc-court-size: 48px;
+    --pc-back-spade-size: 31px;
+    width: 92px;
+    height: 129px;
   }
   .trick-slot.slot-W {
-    transform: translate(calc(-50% - 54px), -50%);
+    transform: translate(calc(-50% - 62px), -50%);
   }
   .trick-slot.slot-E {
-    transform: translate(calc(-50% + 54px), -50%);
+    transform: translate(calc(-50% + 62px), -50%);
   }
   .trick-slot.slot-N {
-    transform: translate(-50%, calc(-50% - 42px));
+    transform: translate(-50%, calc(-50% - 48px));
   }
   .trick-slot.slot-S {
-    transform: translate(-50%, calc(-50% + 42px));
+    transform: translate(-50%, calc(-50% + 48px));
   }
   .action-bar {
     min-height: 38px;
@@ -1390,16 +1485,5 @@ const teamScoreText = computed(() => ({
   }
 }
 
-@media (max-height: 860px) and (min-width: 881px) and (max-width: 999px) {
-  :deep(.hand) {
-    --hand-card-w: 76px;
-    --hand-card-h: 104px;
-    --hand-card-step: 15px;
-    --hand-label-size: 17px;
-    --hand-corner-size: 12px;
-    --hand-pip-size: 15px;
-    --hand-court-size: 36px;
-    --hand-back-spade-size: 24px;
-  }
-}
+
 </style>

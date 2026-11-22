@@ -48,6 +48,44 @@ describe('计分：猪', () => {
     const result = score({ S: [PIG] }, [PIG], { [PIG]: 'S' });
     expect(result.breakdowns.S.final).toBe(-400);
   });
+
+  it('单张黑桃亮猪自收：免窝猪，仍按亮猪 -200', () => {
+    const result = scoreDeal({
+      collected: collected({ S: [PIG] }),
+      litCards: [PIG],
+      litBy: { [PIG]: 'S' },
+      pigLighterSpadeCount: 1,
+    });
+    expect(result.breakdowns.S.pigBase).toBe(-100);
+    expect(result.breakdowns.S.pigLitAdj).toBe(-100);
+    expect(result.breakdowns.S.ownPigAdj).toBe(0);
+    expect(result.breakdowns.S.ownPigExempt).toBe(true);
+    expect(result.breakdowns.S.pigTotal).toBe(-200);
+    expect(result.breakdowns.S.final).toBe(-200);
+  });
+
+  it('亮猪者有多张黑桃时自收仍算窝猪', () => {
+    const result = scoreDeal({
+      collected: collected({ S: [PIG] }),
+      litCards: [PIG],
+      litBy: { [PIG]: 'S' },
+      pigLighterSpadeCount: 2,
+    });
+    expect(result.breakdowns.S.ownPigAdj).toBe(-200);
+    expect(result.breakdowns.S.ownPigExempt).toBe(false);
+    expect(result.breakdowns.S.pigTotal).toBe(-400);
+  });
+
+  it('单张黑桃免窝猪只作用于亮猪者本人，不改变他人收猪的 -200', () => {
+    const result = scoreDeal({
+      collected: collected({ N: [PIG] }),
+      litCards: [PIG],
+      litBy: { [PIG]: 'S' },
+      pigLighterSpadeCount: 1,
+    });
+    expect(result.breakdowns.N.pigTotal).toBe(-200);
+    expect(result.breakdowns.N.ownPigAdj).toBe(0);
+  });
 });
 
 describe('计分：羊与红桃', () => {
@@ -56,16 +94,22 @@ describe('计分：羊与红桃', () => {
     expect(score({ S: [SHEEP] }, [SHEEP], { [SHEEP]: 'S' }).breakdowns.S.final).toBe(200);
   });
 
-  it('亮♥A使收下♥A的玩家红桃分值 ×2', () => {
+  it('亮♥A使全场所有选手红桃分值 ×2（含♥A自身）', () => {
     const hearts = [HEART_A, getCard(2, 11)]; // A + K = -90
     expect(score({ S: hearts }).breakdowns.S.heartsTotal).toBe(-90);
     expect(score({ S: hearts }, [HEART_A], { [HEART_A]: 'S' }).breakdowns.S.heartsTotal).toBe(-180);
   });
 
-  it('收下♥A的玩家红桃分值 ×2（与谁亮无关）', () => {
-    const result = score({ N: [HEART_A] }, [HEART_A], { [HEART_A]: 'S' });
-    expect(result.breakdowns.N.heartsTotal).toBe(-100);
-    expect(result.breakdowns.S.heartsTotal).toBe(0);
+  it('亮♥A后未收♥A的玩家红桃也 ×2，团队分同步翻倍', () => {
+    // 南收 ♥A(-50)，北收 ♥K(-40)；亮♥A 后南 -100、北 -80，团队 -180
+    const result = score(
+      { S: [HEART_A], N: [getCard(2, 11)] },
+      [HEART_A],
+      { [HEART_A]: 'E' },
+    );
+    expect(result.breakdowns.S.heartsTotal).toBe(-100);
+    expect(result.breakdowns.N.heartsTotal).toBe(-80);
+    expect(result.teamScores.A).toBe(-180);
   });
 
   it('亮猪后被同伴收：仍按 -200', () => {

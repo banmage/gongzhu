@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { CLUB_2, KEY_CARDS, PIG, getSuit, isKeyCard, type SuitIndex } from '../models/card';
+import { KEY_CARDS, PIG, SPADE_3, getSuit, isKeyCard, type SuitIndex } from '../models/card';
 import {
   ALL_POSITIONS,
   ORDER,
@@ -42,6 +42,8 @@ function simulateDeal(seed: number): SimResult {
       opponentSmallScore: 0,
       dealIndex: 1,
       litCount: litCards.length,
+      seed,
+      litCards: [...litCards],
     });
     for (const card of cards) {
       if (!isKeyCard(card) || !hands[pos].includes(card)) continue;
@@ -52,8 +54,7 @@ function simulateDeal(seed: number): SimResult {
     }
   }
 
-  const leader = findCardHolder(hands, CLUB_2);
-  let forcedClub2 = true;
+  const leader = findCardHolder(hands, SPADE_3);
   let nextPlayer: Position = leader;
   const collected: Record<Position, number[]> = { S: [], E: [], N: [], W: [] };
   const tricks: Trick[] = [];
@@ -69,15 +70,12 @@ function simulateDeal(seed: number): SimResult {
   for (let trickNo = 0; trickNo < 13; trickNo++) {
     for (let playNo = 0; playNo < 4; playNo++) {
       const leadSuit = current.plays.length > 0 ? getSuit(current.plays[0].card) : null;
-      const mustLeadCard =
-        forcedClub2 && leadSuit === null && nextPlayer === current.leader ? CLUB_2 : null;
       const legal = getLegalCards({
         hand: hands[nextPlayer],
         leadSuit,
         isFirstLedSuit: current.isFirstLed,
         litCards,
         suitStatus,
-        mustLeadCard,
       });
       expect(legal.length).toBeGreaterThan(0);
 
@@ -102,7 +100,6 @@ function simulateDeal(seed: number): SimResult {
           suitStatus[suit] = 'LED';
           current.isFirstLed = true;
         }
-        forcedClub2 = false;
       }
 
       nextPlayer = ORDER[(ORDER.indexOf(nextPlayer) + 1) % 4];

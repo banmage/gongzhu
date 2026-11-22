@@ -22,6 +22,11 @@ export interface ScoreDealInput {
   litCards: number[];
   litBy: Record<number, Position>;
   autoLitCards?: number[];
+  /**
+   * 亮猪者亮牌时手中的黑桃张数。
+   * 为 1 时，亮猪者自收♠Q 属于“单张黑桃被迫收猪”，不记窝猪。
+   */
+  pigLighterSpadeCount?: number;
 }
 
 /**
@@ -44,6 +49,8 @@ export function scoreDeal(input: ScoreDealInput): DealScore {
   const heartALit = litSet.has(HEART_A);
 
   const slamPosition = ALL_POSITIONS.find((pos) => isGrandSlam(collected[pos]));
+  /** 亮猪时手上只有一张黑桃（必然是♠Q）：自收♠Q 不记窝猪 */
+  const pigLighterSingleSpade = input.pigLighterSpadeCount === 1;
 
   const breakdowns = {} as Record<Position, ScoreBreakdown>;
   for (const position of ALL_POSITIONS) {
@@ -52,6 +59,7 @@ export function scoreDeal(input: ScoreDealInput): DealScore {
       cards: collected[position],
       pigLit,
       pigLighter: litBy[PIG],
+      pigLighterSingleSpade,
       sheepLit,
       transformerLit,
       heartALit,
@@ -93,6 +101,7 @@ interface BreakdownInput {
   cards: number[];
   pigLit: boolean;
   pigLighter?: Position;
+  pigLighterSingleSpade: boolean;
   sheepLit: boolean;
   transformerLit: boolean;
   heartALit: boolean;
@@ -108,12 +117,12 @@ function buildBreakdown(input: BreakdownInput): ScoreBreakdown {
   const hasSheep = cards.includes(SHEEP);
   const hasTransformer = cards.includes(TRANSFORMER);
   const hearts = cards.filter((card) => getSuit(card) === 2);
-  const hasHeartA = cards.includes(HEART_A);
 
   /* ---- 猪 ---- */
   let pigBase = 0;
   let pigLitAdj = 0;
   let ownPigAdj = 0;
+  let ownPigExempt = false;
   if (hasPig) {
     if (input.suppressPig) {
       notes.push('满贯：猪不计负分');
@@ -123,8 +132,13 @@ function buildBreakdown(input: BreakdownInput): ScoreBreakdown {
         pigLitAdj = -100;
         notes.push('亮猪：猪分 -100 → -200');
         if (input.pigLighter === position) {
-          ownPigAdj = -200;
-          notes.push('窝猪：亮猪者自收♠Q，猪分记 -400');
+          if (input.pigLighterSingleSpade) {
+            ownPigExempt = true;
+            notes.push('单张黑桃亮猪：自收♠Q 属被迫收猪，不记窝猪，仍按亮猪 -200');
+          } else {
+            ownPigAdj = -200;
+            notes.push('窝猪：亮猪者自收♠Q，猪分记 -400');
+          }
         }
       }
     }
@@ -140,20 +154,21 @@ function buildBreakdown(input: BreakdownInput): ScoreBreakdown {
   /* ---- 红桃 ---- */
   const heartsBase = hearts.reduce((sum, card) => sum + baseHeartValue(card), 0);
   const allRed = hearts.length === 13;
-  const heartALitForPlayer = hasHeartA && input.heartALit;
+  /** 亮♥A：全场所有选手的红桃分值都×2（含♥A自身），与谁亮、谁收无关 */
+  const heartALitForPlayer = input.heartALit && hearts.length > 0;
   let heartsTotal = heartsBase;
   if (heartALitForPlayer) {
-    notes.push('亮♥A：该玩家红桃分值 ×2（含♥A自身）');
+    notes.push('亮♥A：全场红桃分值 ×2（含♥A自身）');
   }
   if (allRed) {
-    const doubled = heartALitForPlayer ? heartsBase * 2 : heartsBase;
+    const doubled = input.heartALit ? heartsBase * 2 : heartsBase;
     heartsTotal = -doubled;
     notes.push(
-      heartALitForPlayer
-        ? '全红：红桃 -400 → +400（先按亮♥A翻倍，再反转）'
+      input.heartALit
+        ? '全红：红桃 -400 → +400（先按亮♥A全场翻倍，再反转）'
         : '全红：红桃 -200 → +200',
     );
-  } else if (heartALitForPlayer) {
+  } else if (input.heartALit) {
     heartsTotal = heartsBase * 2;
   }
   const heartLitAdj = heartsTotal - heartsBase;
@@ -188,6 +203,7 @@ function buildBreakdown(input: BreakdownInput): ScoreBreakdown {
     pigBase,
     pigLitAdj,
     ownPigAdj,
+    ownPigExempt,
     pigTotal,
     sheepBase,
     sheepLitAdj,

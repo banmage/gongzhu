@@ -20,7 +20,21 @@
   --suit-font: 'Bridge Suit Symbols', 'Noto Sans Symbols 2', 'Segoe UI Symbol', 'Apple Symbols',
     'Arial Unicode MS', 'DejaVu Sans', sans-serif;
   --club-ink: #172b63;
+  /* 分数颜色：正分红、负分绿、零分中性色 */
+  --score-positive: #c0392b;
+  --score-negative: #1d6b45;
+  --score-zero: #6b7a70;
   font-family: 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', system-ui, sans-serif;
+}
+
+.score-pos {
+  color: var(--score-positive);
+}
+.score-neg {
+  color: var(--score-negative);
+}
+.score-zero {
+  color: var(--score-zero);
 }
 
 .suit-symbol {

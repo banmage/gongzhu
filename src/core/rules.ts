@@ -52,8 +52,6 @@ export interface LegalContext {
   litCards: number[];
   /** 各花色首轮状态 */
   suitStatus: Record<SuitIndex, SuitStatus>;
-  /** 首副强制领出 ♣2 */
-  mustLeadCard?: number | null;
 }
 
 function isRestrictedByFirstLead(card: number, litCards: number[], suitStatus: Record<SuitIndex, SuitStatus>): boolean {
@@ -69,13 +67,10 @@ function isRestrictedByFirstLead(card: number, litCards: number[], suitStatus: R
  * - 例外②：领出时若手中只剩受限制亮牌，兜底允许任选一张领出，避免死锁。
  */
 export function getLegalCards(ctx: LegalContext): number[] {
-  const { hand, leadSuit, isFirstLedSuit, litCards, suitStatus, mustLeadCard } = ctx;
+  const { hand, leadSuit, isFirstLedSuit, litCards, suitStatus } = ctx;
 
-  // 领出
+  // 领出：首引花色无限制，只受“该花色尚未领出时的亮牌限制”影响
   if (leadSuit === null) {
-    if (mustLeadCard !== undefined && mustLeadCard !== null) {
-      return hand.includes(mustLeadCard) ? [mustLeadCard] : [...hand];
-    }
     const allowed = hand.filter((card) => !isRestrictedByFirstLead(card, litCards, suitStatus));
     // 兜底：手中全是受限制亮牌时允许任选一张领出
     return allowed.length > 0 ? allowed : [...hand];
