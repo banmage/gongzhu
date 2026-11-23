@@ -77,6 +77,7 @@ const eventTagClass: Record<GameEventType, string> = {
   TIMEOUT_AUTO_PLAY: 'tag-red',
   AI_TAKEOVER_STARTED: 'tag-dark',
   TRICK_COMPLETED: 'tag-gray',
+  DEAL_CONCLUDED: 'tag-gold',
   SCORE_CALCULATED: 'tag-green',
   PIG_HEAD_ASSIGNED: 'tag-red',
   ROUND_COMPLETED: 'tag-gold',
@@ -171,7 +172,7 @@ function exportJson(): void {
 
         <el-tab-pane label="复盘" name="replay">
           <div v-if="store.dealHistory.length === 0" class="empty-note">
-            暂无已完成的副牌。完成一副牌后，这里会保留发牌种子、亮牌、13 墩出牌与结算明细，可按墩回看。
+            暂无已完成的副牌。完成一副牌后，这里会保留发牌种子、亮牌、逐墩出牌与结算明细，可按墩回看（提前结束时不足 13 墩）。
           </div>
 
           <template v-else>

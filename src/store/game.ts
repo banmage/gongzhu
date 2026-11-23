@@ -33,13 +33,16 @@ import { dealWithSeed, findCardHolder } from '../core/deck';
 import { randomSeed } from '../core/rng';
 import {
   determineTrickWinner,
+  evaluateDealConclusion,
   evaluateDealLimit,
   evaluatePigHeads,
   getLegalCards,
   pickTimeoutCard,
+  remainingCards,
   resolveMatch,
   sortHand,
   trickBasePoints,
+  type DealConclusion,
 } from '../core/rules';
 import { scoreDeal } from '../core/scoring';
 import { chooseLights, choosePlay } from '../core/ai';
@@ -66,6 +69,10 @@ const TRICK_WINNER_HOLD_MS = 620;
 const TRICK_PRE_WINNER_MS = TRICK_DISPLAY_MS - TRICK_WINNER_HOLD_MS;
 /** 南家只剩唯一合法牌时，自动出牌前的短暂停留 */
 const SINGLE_CARD_AUTO_MS = 300;
+/** 剩余牌全部为最大牌时，亮开手牌并展示给玩家的时长 */
+const TOP_CARDS_REVEAL_MS = 1800;
+/** 其他提前结束情形，展示结束提示的时长 */
+const EARLY_CONCLUDE_MS = 900;
 
 function emptyHands(): Record<Position, number[]> {
   return { S: [], E: [], N: [], W: [] };
@@ -131,6 +138,12 @@ export const useGameStore = defineStore('gongzhu', () => {
   const auditInfo = ref<AuditInfo | null>(null);
   const events = ref<GameEvent[]>([]);
   const dealHistory = ref<DealRecord[]>([]);
+  /** 提前结束本副时，是否亮开所有人的剩余手牌 */
+  const remainingRevealed = ref(false);
+  /** 提前结束本副时，收下全部剩余牌的座位 */
+  const remainingAwardTo = ref<Position | null>(null);
+  /** 本副提前结束的判定结果（用于提示与测试） */
+  const earlyConclusion = ref<DealConclusion | null>(null);
   let eventSeq = 0;
 
   /** 记录审计事件；亮牌提交后即视为公开信息，可写入具体牌种。 */
@@ -163,6 +176,7 @@ export const useGameStore = defineStore('gongzhu', () => {
   let aiTimer: ReturnType<typeof setTimeout> | null = null;
   let singleCardTimer: ReturnType<typeof setTimeout> | null = null;
   let trickTimer: ReturnType<typeof setTimeout> | null = null;
+  let concludeTimer: ReturnType<typeof setTimeout> | null = null;
   let lightFinishTimer: ReturnType<typeof setTimeout> | null = null;
   let lightAiTimers: ReturnType<typeof setTimeout>[] = [];
 
@@ -200,6 +214,11 @@ export const useGameStore = defineStore('gongzhu', () => {
     trickTimer = null;
   }
 
+  function clearConcludeTimer(): void {
+    if (concludeTimer !== null) clearTimeout(concludeTimer);
+    concludeTimer = null;
+  }
+
   function clearLightTimers(): void {
     clearLightCountdown();
     if (lightFinishTimer !== null) clearTimeout(lightFinishTimer);
@@ -215,6 +234,7 @@ export const useGameStore = defineStore('gongzhu', () => {
     clearAiTimer();
     clearSingleCardTimer();
     clearTrickTimer();
+    clearConcludeTimer();
     if (revealTimer !== null) clearTimeout(revealTimer);
     revealTimer = null;
   }
@@ -566,6 +586,9 @@ export const useGameStore = defineStore('gongzhu', () => {
     settling.value = false;
     isAiThinking.value = false;
     dealResultDismissed.value = false;
+    remainingRevealed.value = false;
+    remainingAwardTo.value = null;
+    earlyConclusion.value = null;
     message.value = `第 ${round.number} 局 · 第 ${dealIndex} 副：发牌中…`;
     logEvent(
       'DEAL_CREATED',
@@ -777,8 +800,61 @@ export const useGameStore = defineStore('gongzhu', () => {
     message.value = current.openingDeal
       ? `首副：${seatName(current.leader)}持♠3领出，首引花色不限`
       : `${seatName(current.leader)}领出`;
+
+    const conclusion = evaluateDealConclusion(current.hands, current.collected, current.leader);
+    if (conclusion) {
+      concludeDealEarly(current.leader, conclusion);
+      return;
+    }
+
     startPlayCountdown();
     scheduleAiIfNeeded();
+  }
+
+  function conclusionMessage(conclusion: DealConclusion, recipient: Position): string {
+    switch (conclusion.reason) {
+      case 'TOP_CARDS':
+        return `${seatName(recipient)}手中剩余牌均为场上最大牌，亮开所有人剩余手牌，全部剩余牌归${seatName(recipient)}，本副结束`;
+      case 'ALL_SCORING_COLLECTED':
+        return `红桃与猪、羊、变压器均已归属，本副提前结束`;
+      case 'HARMLESS_REMAINDER':
+        return `剩余牌均无分值且不影响全红与变压器，本副提前结束`;
+    }
+  }
+
+  /** 结算页展示用的提前结束说明 */
+  const earlyConclusionText = computed(() => {
+    const conclusion = earlyConclusion.value;
+    if (!conclusion) return '';
+    const recipient = remainingAwardTo.value ?? deal.value?.leader ?? 'S';
+    return conclusionMessage(conclusion, recipient);
+  });
+
+  /** 提前结束本副：锁定出牌权，亮开手牌（如需要），随后进入计分阶段 */
+  function concludeDealEarly(recipient: Position, conclusion: DealConclusion): void {
+    const current = deal.value;
+    if (!current || phase.value !== 'playing') return;
+
+    clearPlayCountdown();
+    clearAiTimer();
+    clearSingleCardTimer();
+    clearTrickTimer();
+    clearConcludeTimer();
+    isAiThinking.value = false;
+    settling.value = true;
+    remainingRevealed.value = conclusion.reveal;
+    remainingAwardTo.value = recipient;
+    earlyConclusion.value = conclusion;
+
+    const remaining = remainingCards(current.hands);
+    const text = conclusionMessage(conclusion, recipient);
+    message.value = `${text}（剩余 ${remaining.length} 张）`;
+    logEvent('DEAL_CONCLUDED', `${text}（剩余 ${remaining.length} 张）`, { position: recipient });
+
+    concludeTimer = setTimeout(() => {
+      concludeTimer = null;
+      endDeal();
+    }, conclusion.reveal ? TOP_CARDS_REVEAL_MS : EARLY_CONCLUDE_MS);
   }
 
   function startPlayCountdown(): void {
@@ -989,6 +1065,17 @@ export const useGameStore = defineStore('gongzhu', () => {
       return;
     }
 
+    // 赢家获得下一墩出牌权；若已经满足提前结束条件，先完整展示本墩再结束。
+    const conclusion = evaluateDealConclusion(current.hands, current.collected, winner);
+    if (conclusion) {
+      clearTrickTimer();
+      trickTimer = setTimeout(() => {
+        trickTimer = null;
+        concludeDealEarly(winner, conclusion);
+      }, TRICK_WINNER_HOLD_MS);
+      return;
+    }
+
     clearTrickTimer();
     trickTimer = setTimeout(() => {
       const live = deal.value;
@@ -1018,8 +1105,24 @@ export const useGameStore = defineStore('gongzhu', () => {
     clearAiTimer();
     clearSingleCardTimer();
     clearTrickTimer();
+    clearConcludeTimer();
     settling.value = false;
     isAiThinking.value = false;
+
+    // 提前结束时，剩余手牌全部归控制出牌权的座位。
+    // 触发条件已保证这些牌要么无分值，要么全部是场上最大牌。
+    const conclusion = earlyConclusion.value;
+    const awardTo = remainingAwardTo.value;
+    if (awardTo) {
+      const leftovers = remainingCards(current.hands);
+      if (leftovers.length > 0) {
+        current.collected[awardTo].push(...leftovers);
+        for (const pos of ALL_POSITIONS) current.hands[pos] = [];
+      }
+      // 保留 remainingAwardTo 供结算页说明使用，下一副发牌时统一重置。
+    }
+    const conclusionPrefix =
+      conclusion && awardTo ? `${conclusionMessage(conclusion, awardTo)}；` : '';
 
     const pigLighter = current.litBy[PIG];
     /** 亮猪者亮牌时（亮牌阶段手牌完整）手中的黑桃张数 */
@@ -1123,9 +1226,9 @@ export const useGameStore = defineStore('gongzhu', () => {
       return;
     }
 
-    message.value = `本副结算：A队 ${formatSigned(score.teamScores.A)} / B队 ${formatSigned(
-      score.teamScores.B,
-    )}，继续下一副`;
+    message.value = `${conclusionPrefix}本副结算：A队 ${formatSigned(
+      score.teamScores.A,
+    )} / B队 ${formatSigned(score.teamScores.B)}，继续下一副`;
   }
 
   /** 本副结算弹窗点击“下一副 / 进入下一局” */
@@ -1378,6 +1481,10 @@ export const useGameStore = defineStore('gongzhu', () => {
     auditInfo,
     events,
     dealHistory,
+    remainingRevealed,
+    remainingAwardTo,
+    earlyConclusion,
+    earlyConclusionText,
     lightRuleRuntime,
 
     // computed

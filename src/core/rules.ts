@@ -4,11 +4,13 @@ import {
   TRANSFORMER,
   baseHeartValue,
   cardBasePoints,
+  getCard,
   getRank,
   getSuit,
   type SuitIndex,
 } from '../models/card';
 import {
+  ALL_POSITIONS,
   otherTeam,
   resultText,
   teamName,
@@ -133,6 +135,158 @@ export function trickBasePoints(plays: CardPlay[]): number {
 /** 本墩内的红桃张数 */
 export function trickHeartCount(plays: CardPlay[]): number {
   return plays.filter((play) => getSuit(play.card) === 2).length;
+}
+
+/* ------------------------------------------------------------------ *
+ * 提前结束本副
+ * ------------------------------------------------------------------ */
+
+/** 场上尚未打出的牌（四家手牌并集） */
+export function remainingCards(hands: Record<Position, number[]>): number[] {
+  return ALL_POSITIONS.flatMap((pos) => hands[pos]);
+}
+
+function collectedCards(collected: Record<Position, number[]>): number[] {
+  return ALL_POSITIONS.flatMap((pos) => collected[pos]);
+}
+
+/** 猪、羊、变压器是否都已经有归属 */
+export function keyCardsCollected(collected: Record<Position, number[]>): boolean {
+  const all = collectedCards(collected);
+  return all.includes(PIG) && all.includes(SHEEP) && all.includes(TRANSFORMER);
+}
+
+/** 全部 13 张红桃与猪、羊、变压器是否都已经有归属 */
+export function allScoringCardsCollected(collected: Record<Position, number[]>): boolean {
+  if (!keyCardsCollected(collected)) return false;
+  const all = new Set(collectedCards(collected));
+  for (let rank = 0; rank < 13; rank++) {
+    if (!all.has(getCard(2, rank))) return false;
+  }
+  return true;
+}
+
+/**
+ * 是否仍有任意一家可能收齐全红。
+ * 全红必须由单人收齐 13 张红桃；一旦已有两家收过红桃，任何人的全红都已不可能。
+ */
+export function isAllRedStillPossible(collected: Record<Position, number[]>): boolean {
+  const heartHolders = ALL_POSITIONS.filter((pos) =>
+    collected[pos].some((card) => getSuit(card) === 2),
+  );
+  return heartHolders.length <= 1;
+}
+
+/**
+ * 剩余的无分红桃是否仍可能影响变压器结算。
+ *
+ * 变压器“独拿”要求持有者除变压器外没有任何猪/羊/红桃。
+ * 若剩余还有红桃（即使只是 ♥4/♥3/♥2 这类无分红桃），而持有者目前仍是独拿，
+ * 则该持有者仍有可能在后续赢墩中收下这些红桃，把独拿 +50（亮变 +100）变成
+ * 非独拿 ×2/×4（在无其他分时即为 0 分）。只要存在这种可能性，就不能提前结束；
+ * 这里按“有可能”从严处理，避免提前结算改变变压器结果。
+ */
+export function transformerUnaffectedByRemainingHearts(
+  collected: Record<Position, number[]>,
+  remaining: number[],
+): boolean {
+  const holder = ALL_POSITIONS.find((pos) => collected[pos].includes(TRANSFORMER));
+  if (!holder) return false;
+  if (!remaining.some((card) => getSuit(card) === 2)) return true;
+  const held = collected[holder];
+  return (
+    held.includes(PIG) ||
+    held.includes(SHEEP) ||
+    held.some((card) => getSuit(card) === 2)
+  );
+}
+
+/**
+ * 剩余牌是否全部为无分牌（不含猪/羊/变压器，红桃只能是 ♥4/♥3/♥2）。
+ * 这些牌既不会产生个人分，也不会改变红桃分值与变压器独拿判定。
+ */
+export function hasOnlyHarmlessRemaining(hands: Record<Position, number[]>): boolean {
+  return remainingCards(hands).every((card) => {
+    if (card === PIG || card === SHEEP || card === TRANSFORMER) return false;
+    if (getSuit(card) === 2 && getRank(card) >= 3) return false; // ♥5 及以上
+    return true;
+  });
+}
+
+/**
+ * 领出者手中是否全部为场上最大牌。
+ *
+ * 对每个花色，若领出者持有该花色的牌，则这些牌必须全部大于其他三家
+ * 在该花色中的任何剩余牌。满足时领出者每一轮领出都无人能压过，
+ * 必然收下全部剩余牌。
+ */
+export function leaderHoldsAllTopCards(
+  hands: Record<Position, number[]>,
+  leader: Position,
+): boolean {
+  const own = hands[leader];
+  if (own.length === 0) return false;
+
+  for (const suit of [0, 1, 2, 3] as SuitIndex[]) {
+    const ownRanks = own.filter((card) => getSuit(card) === suit).map(getRank);
+    if (ownRanks.length === 0) continue;
+
+    const otherRanks = ALL_POSITIONS.filter((pos) => pos !== leader)
+      .flatMap((pos) => hands[pos])
+      .filter((card) => getSuit(card) === suit)
+      .map(getRank);
+    if (otherRanks.length === 0) continue;
+
+    // 领出者该花色最小的牌也必须大于其他家该花色最大的牌
+    if (Math.min(...ownRanks) <= Math.max(...otherRanks)) return false;
+  }
+
+  return true;
+}
+
+export type DealConclusionReason =
+  | 'TOP_CARDS'
+  | 'ALL_SCORING_COLLECTED'
+  | 'HARMLESS_REMAINDER';
+
+export interface DealConclusion {
+  reason: DealConclusionReason;
+  /** 是否需要亮开所有人的剩余手牌 */
+  reveal: boolean;
+}
+
+/**
+ * 判断当前是否可以提前结束本副。
+ *
+ * 优先级：
+ * 1. 领出者手中全部为最大牌：亮开所有剩余手牌，由其收下全部剩余牌；
+ * 2. 所有红桃与猪/羊/变压器均已有归属：剩余牌不可能再产生任何分数；
+ * 3. 猪/羊/变压器已有归属，剩余全为无分牌，且全红已不可能、
+ *    变压器也不会被剩余无分红桃改变。
+ */
+export function evaluateDealConclusion(
+  hands: Record<Position, number[]>,
+  collected: Record<Position, number[]>,
+  leader: Position,
+): DealConclusion | null {
+  if (leaderHoldsAllTopCards(hands, leader)) {
+    return { reason: 'TOP_CARDS', reveal: true };
+  }
+
+  if (allScoringCardsCollected(collected)) {
+    return { reason: 'ALL_SCORING_COLLECTED', reveal: false };
+  }
+
+  if (
+    keyCardsCollected(collected) &&
+    hasOnlyHarmlessRemaining(hands) &&
+    !isAllRedStillPossible(collected) &&
+    transformerUnaffectedByRemainingHearts(collected, remainingCards(hands))
+  ) {
+    return { reason: 'HARMLESS_REMAINDER', reveal: false };
+  }
+
+  return null;
 }
 
 /* ------------------------------------------------------------------ *

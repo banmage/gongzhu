@@ -165,7 +165,7 @@ const teamScoreText = computed(() => ({
       <Hand
         :cards="store.visibleHand('N')"
         position="N"
-        :face-down="true"
+        :face-down="!store.remainingRevealed"
         :active="isActive('N')"
         :clickable="false"
         :show-turn-arrow="showTurnArrow('N')"
@@ -251,7 +251,7 @@ const teamScoreText = computed(() => ({
       <Hand
         :cards="store.visibleHand('W')"
         position="W"
-        :face-down="true"
+        :face-down="!store.remainingRevealed"
         :active="isActive('W')"
         :clickable="false"
         :show-turn-arrow="showTurnArrow('W')"
@@ -393,7 +393,7 @@ const teamScoreText = computed(() => ({
       <Hand
         :cards="store.visibleHand('E')"
         position="E"
-        :face-down="true"
+        :face-down="!store.remainingRevealed"
         :active="isActive('E')"
         :clickable="false"
         :show-turn-arrow="showTurnArrow('E')"

@@ -1,17 +1,27 @@
 import { describe, expect, it } from 'vitest';
 import {
   CLUB_2,
+  HEART_A,
   PIG,
+  SHEEP,
+  TRANSFORMER,
   getCard,
   type SuitIndex,
 } from '../models/card';
-import type { CardPlay, SuitStatus } from '../models/game';
+import type { CardPlay, Position, SuitStatus } from '../models/game';
 import {
+  allScoringCardsCollected,
   determineTrickWinner,
+  evaluateDealConclusion,
   evaluateDealLimit,
   evaluatePigHeads,
   getLegalCards,
+  hasOnlyHarmlessRemaining,
+  isAllRedStillPossible,
+  keyCardsCollected,
+  leaderHoldsAllTopCards,
   pickTimeoutCard,
+  transformerUnaffectedByRemainingHearts,
 } from '../core/rules';
 
 const NOT_LED: Record<SuitIndex, SuitStatus> = {
@@ -198,5 +208,147 @@ describe('画猪头判定（6.2 / 6.4 / 6.5）', () => {
       winner: 'NONE',
       result: 'DRAW',
     });
+  });
+});
+
+describe('提前结束本副判定', () => {
+  function hands(partial: Partial<Record<Position, number[]>> = {}): Record<Position, number[]> {
+    return { S: [], E: [], N: [], W: [], ...partial };
+  }
+
+  function collected(
+    partial: Partial<Record<Position, number[]>> = {},
+  ): Record<Position, number[]> {
+    return { S: [], E: [], N: [], W: [], ...partial };
+  }
+
+  /** 红桃 ♥5~♥A（10 张有分红桃） */
+  const pointHearts = [3, 4, 5, 6, 7, 8, 9, 10, 11, 12].map((rank) => getCard(2, rank));
+  /** 无分红桃 ♥4/♥3/♥2 */
+  const harmlessHearts = [0, 1, 2].map((rank) => getCard(2, rank));
+
+  it('全部红桃与猪/羊/变压器收齐后，判定所有计分牌已有归属', () => {
+    const allHearts = Array.from({ length: 13 }, (_, rank) => getCard(2, rank));
+    expect(
+      allScoringCardsCollected(collected({ S: [PIG, ...allHearts], E: [SHEEP, TRANSFORMER] })),
+    ).toBe(true);
+    expect(
+      allScoringCardsCollected(collected({ S: [PIG, ...allHearts.slice(0, 12)], E: [SHEEP, TRANSFORMER] })),
+    ).toBe(false);
+  });
+
+  it('剩余牌只允许 ♥4/♥3/♥2 和其他无分牌', () => {
+    expect(
+      hasOnlyHarmlessRemaining(
+        hands({ S: [...harmlessHearts, getCard(0, 0), getCard(1, 1), getCard(3, 2)] }),
+      ),
+    ).toBe(true);
+    expect(hasOnlyHarmlessRemaining(hands({ S: [getCard(2, 3)] }))).toBe(false); // ♥5
+    expect(hasOnlyHarmlessRemaining(hands({ S: [PIG] }))).toBe(false);
+    expect(hasOnlyHarmlessRemaining(hands({ S: [TRANSFORMER] }))).toBe(false);
+  });
+
+  it('已有两家收过红桃时，任何人的全红都不可能', () => {
+    expect(isAllRedStillPossible(collected({ S: [pointHearts[0]] }))).toBe(true);
+    expect(
+      isAllRedStillPossible(collected({ S: [pointHearts[0]], E: [pointHearts[1]] })),
+    ).toBe(false);
+  });
+
+  it('变压器独拿者若还没收过其他计分牌，剩余红桃会改变其结算', () => {
+    const remaining = [getCard(2, 0)]; // ♥2
+    expect(
+      transformerUnaffectedByRemainingHearts(
+        collected({ S: [TRANSFORMER, SHEEP] }),
+        remaining,
+      ),
+    ).toBe(true);
+    expect(
+      transformerUnaffectedByRemainingHearts(collected({ S: [TRANSFORMER] }), remaining),
+    ).toBe(false);
+    expect(
+      transformerUnaffectedByRemainingHearts(collected({ S: [TRANSFORMER] }), []),
+    ).toBe(true);
+  });
+
+  it('领出者同花色全部大于其他家剩余牌时，才视为全部最大牌', () => {
+    const SPADE_A = getCard(3, 12);
+    const SPADE_K = getCard(3, 11);
+    const SPADE_Q = getCard(3, 10);
+    const SPADE_J = getCard(3, 9);
+    const SPADE_2 = getCard(3, 0);
+    const SPADE_3 = getCard(3, 1);
+
+    expect(
+      leaderHoldsAllTopCards(
+        hands({ S: [SPADE_A, SPADE_K], E: [SPADE_Q], N: [SPADE_J], W: [SPADE_2] }),
+        'S',
+      ),
+    ).toBe(true);
+    expect(
+      leaderHoldsAllTopCards(
+        hands({ S: [SPADE_A, SPADE_2], E: [SPADE_3], N: [SPADE_Q], W: [SPADE_J] }),
+        'S',
+      ),
+    ).toBe(false);
+    expect(leaderHoldsAllTopCards(hands({ S: [SPADE_2], E: [SPADE_A] }), 'S')).toBe(false);
+    expect(leaderHoldsAllTopCards(hands({ S: [], E: [SPADE_A] }), 'S')).toBe(false);
+  });
+
+  it('优先按“全部最大牌”结束，并亮开剩余手牌', () => {
+    const result = evaluateDealConclusion(
+      hands({ S: [getCard(3, 12)], E: [getCard(3, 11)] }),
+      collected({ S: [PIG, SHEEP, TRANSFORMER, HEART_A] }),
+      'S',
+    );
+    expect(result).toEqual({ reason: 'TOP_CARDS', reveal: true });
+  });
+
+  it('全部计分牌已有归属时提前结束', () => {
+    const allHearts = Array.from({ length: 13 }, (_, rank) => getCard(2, rank));
+    const result = evaluateDealConclusion(
+      hands({ S: [getCard(0, 0)], E: [getCard(3, 0)], N: [getCard(3, 12)] }),
+      collected({ S: [PIG, ...allHearts], E: [SHEEP, TRANSFORMER] }),
+      'E',
+    );
+    expect(result).toEqual({ reason: 'ALL_SCORING_COLLECTED', reveal: false });
+  });
+
+  it('剩余无分牌且不影响全红/变压器时提前结束', () => {
+    const half = pointHearts.slice(0, 5);
+    const rest = pointHearts.slice(5);
+    const result = evaluateDealConclusion(
+      hands({ S: [harmlessHearts[0]], E: [harmlessHearts[1]], N: [harmlessHearts[2]] }),
+      collected({
+        S: [PIG, ...half],
+        E: [SHEEP, TRANSFORMER, ...rest],
+      }),
+      'S',
+    );
+    expect(result).toEqual({ reason: 'HARMLESS_REMAINDER', reveal: false });
+  });
+
+  it('全红仍可能时，不因剩余无分牌提前结束', () => {
+    const result = evaluateDealConclusion(
+      hands({ S: [harmlessHearts[0]], E: [harmlessHearts[1]], N: [harmlessHearts[2]] }),
+      collected({ S: [PIG, SHEEP, TRANSFORMER, ...pointHearts] }),
+      'S',
+    );
+    expect(result).toBeNull();
+  });
+
+  it('单独变压器持有者可能获得剩余红桃时，不提前结束（避免 +50 变 0）', () => {
+    const half = pointHearts.slice(0, 5);
+    const rest = pointHearts.slice(5);
+    const result = evaluateDealConclusion(
+      hands({ S: [harmlessHearts[0]], E: [harmlessHearts[1]], N: [harmlessHearts[2]] }),
+      collected({
+        S: [PIG, ...half],
+        E: [SHEEP, ...rest],
+        N: [TRANSFORMER],
+      }),
+      'S',
+    );
+    expect(result).toBeNull();
   });
 });

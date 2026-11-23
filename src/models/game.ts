@@ -297,6 +297,7 @@ export type GameEventType =
   | 'TIMEOUT_AUTO_PLAY'
   | 'AI_TAKEOVER_STARTED'
   | 'TRICK_COMPLETED'
+  | 'DEAL_CONCLUDED'
   | 'SCORE_CALCULATED'
   | 'PIG_HEAD_ASSIGNED'
   | 'ROUND_COMPLETED'
@@ -324,6 +325,7 @@ export const EVENT_TYPE_TEXT: Record<GameEventType, string> = {
   TIMEOUT_AUTO_PLAY: '超时代打',
   AI_TAKEOVER_STARTED: 'AI 接管',
   TRICK_COMPLETED: '墩结算',
+  DEAL_CONCLUDED: '提前结束',
   SCORE_CALCULATED: '副结算',
   PIG_HEAD_ASSIGNED: '画猪头',
   ROUND_COMPLETED: '局结算',

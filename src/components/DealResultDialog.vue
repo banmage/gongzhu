@@ -208,6 +208,15 @@ function resultClass(): string {
         <div class="slam-text"><strong>满贯触发</strong><span>本副普通分不参与小分累计。</span></div>
       </div>
 
+      <!-- 提前结束：说明为何未打满 13 墩 -->
+      <div v-if="store.earlyConclusionText" class="early-banner">
+        <div class="early-icon">止</div>
+        <div class="early-text">
+          <strong>本副提前结束</strong>
+          <span>{{ store.earlyConclusionText }}</span>
+        </div>
+      </div>
+
       <!-- 本副亮牌：醒目展示四张关键牌谁亮/未亮 -->
       <div class="dr-section-title">
         本副亮牌
@@ -508,6 +517,40 @@ function resultClass(): string {
   line-height: 1.5;
 }
 .slam-text strong {
+  font-size: 14px;
+}
+
+.early-banner {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  border-radius: 10px;
+  background: #f1f4ee;
+  border: 1px solid #c9d6c4;
+  color: #2f4438;
+}
+.early-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 42px;
+  height: 42px;
+  flex: none;
+  border-radius: 50%;
+  background: #5f7a68;
+  color: #fff;
+  font-size: 18px;
+  font-weight: 900;
+}
+.early-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 12px;
+  line-height: 1.5;
+}
+.early-text strong {
   font-size: 14px;
 }
 

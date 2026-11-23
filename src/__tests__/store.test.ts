@@ -17,6 +17,18 @@ describe('store 端到端流程', () => {
     vi.unstubAllGlobals();
   });
 
+  /** 跳过发牌与亮牌阶段，进入出牌阶段 */
+  function reachPlaying(store: ReturnType<typeof useGameStore>): void {
+    vi.advanceTimersByTime(2000);
+    if (store.phase === 'lighting' && !store.humanSubmittedLight) {
+      store.submitHumanLight([]);
+    }
+    for (let i = 0; i < 200 && store.phase !== 'playing'; i++) {
+      vi.advanceTimersByTime(100);
+    }
+    expect(store.phase).toBe('playing');
+  }
+
   it('发牌 → 亮牌 → 揭晓 → 13墩 → 结算可以完整走通', () => {
     const store = useGameStore();
     store.startMatch(5, 12345);
@@ -43,7 +55,9 @@ describe('store 端到端流程', () => {
     vi.advanceTimersByTime(200_000);
 
     expect(store.phase).toBe('scoring');
-    expect(store.deal?.tricks).toHaveLength(13);
+    // 计分牌全部归属或剩余牌均为最大牌时会提前结束，不再强制打满 13 墩
+    expect(store.deal?.tricks.length).toBeGreaterThan(0);
+    expect(store.deal?.tricks.length).toBeLessThanOrEqual(13);
     expect(store.deal?.score).not.toBeNull();
     expect(store.dealResultVisible).toBe(true);
 
@@ -400,6 +414,143 @@ describe('store 端到端流程', () => {
     expect(store.deal?.lastAction).toMatchObject({ position: 'S', card: onlyCard, single: true });
     expect(store.deal?.currentTrick.plays).toHaveLength(1);
     expect(store.deal?.currentTrick.plays[0].single).toBe(true);
+  });
+
+  it('所有红桃与猪羊变压器都有归属时自动结束本副', () => {
+    const store = useGameStore();
+    store.config.aiDelayMs = 0;
+    store.config.playSeconds = 0;
+    store.startMatch(5, 20261123);
+    reachPlaying(store);
+
+    const current = store.deal!;
+    const allHearts = Array.from({ length: 13 }, (_, rank) => getCard(2, rank));
+    current.hands.S = [getCard(3, 0)]; // ♠2
+    current.hands.E = [getCard(3, 1)]; // ♠3
+    current.hands.N = [getCard(3, 2)]; // ♠4
+    current.hands.W = [getCard(3, 3)]; // ♠5
+    current.collected.S = [PIG, ...allHearts];
+    current.collected.E = [SHEEP, TRANSFORMER];
+    current.collected.N = [];
+    current.collected.W = [];
+    current.leader = 'S';
+    current.nextPlayer = 'S';
+    current.currentTrick = {
+      leader: 'S',
+      plays: [],
+      winner: null,
+      points: 0,
+      firstLedSuit: null,
+      isFirstLed: false,
+    };
+
+    store.setAutoPilot(true);
+    vi.advanceTimersByTime(10_000);
+
+    expect(store.phase).toBe('scoring');
+    expect(store.earlyConclusion?.reason).toBe('ALL_SCORING_COLLECTED');
+    expect(store.deal?.tricks).toHaveLength(1);
+    // 13 张红桃 + 猪/羊/变压器 + 本墩 4 张黑桃
+    expect(
+      ALL_POSITIONS.reduce((sum, pos) => sum + (store.deal?.collected[pos].length ?? 0), 0),
+    ).toBe(20);
+  });
+
+  it('控制出牌权者剩余牌全为最大牌时，亮开手牌并收下全部剩余牌', () => {
+    const store = useGameStore();
+    store.config.aiDelayMs = 0;
+    store.config.playSeconds = 0;
+    store.startMatch(5, 20261124);
+    reachPlaying(store);
+
+    const current = store.deal!;
+    current.hands.S = [getCard(3, 12), getCard(3, 11)]; // ♠A ♠K
+    current.hands.E = [getCard(3, 10)]; // ♠Q
+    current.hands.N = [getCard(3, 9)]; // ♠J
+    current.hands.W = [getCard(3, 8)]; // ♠10
+    current.collected.S = [];
+    current.collected.E = [];
+    current.collected.N = [];
+    current.collected.W = [];
+    current.leader = 'S';
+    current.nextPlayer = 'S';
+    current.currentTrick = {
+      leader: 'S',
+      plays: [],
+      winner: null,
+      points: 0,
+      firstLedSuit: null,
+      isFirstLed: false,
+    };
+
+    store.setAutoPilot(true);
+    vi.advanceTimersByTime(3300);
+
+    // 已亮开所有人的剩余手牌，并提示结束牌局
+    expect(store.phase).toBe('playing');
+    expect(store.remainingRevealed).toBe(true);
+    expect(store.earlyConclusion).toEqual({ reason: 'TOP_CARDS', reveal: true });
+    expect(store.message).toContain('最大牌');
+    expect(store.earlyConclusionText).toContain('最大牌');
+    expect(store.remainingAwardTo).toBe('S');
+
+    vi.advanceTimersByTime(2500);
+
+    expect(store.phase).toBe('scoring');
+    expect(store.deal?.tricks).toHaveLength(1);
+    // 本墩 4 张 + 领出者剩余的 1 张最大牌
+    expect(store.deal?.collected.S).toHaveLength(5);
+    expect(ALL_POSITIONS.reduce(
+      (sum, pos) => sum + (store.deal?.collected[pos].length ?? 0),
+      0,
+    )).toBe(5);
+  });
+
+  it('单独变压器持有者收下剩余红桃后，变压器按非独拿计 0 分', () => {
+    const store = useGameStore();
+    store.config.aiDelayMs = 0;
+    store.config.playSeconds = 0;
+    store.startMatch(5, 20261125);
+    reachPlaying(store);
+
+    const current = store.deal!;
+    current.hands.S = [
+      getCard(3, 12), // ♠A
+      getCard(2, 2), // ♥4
+      getCard(2, 1), // ♥3
+      getCard(2, 0), // ♥2
+    ];
+    current.hands.E = [getCard(3, 9)]; // ♠J
+    current.hands.N = [getCard(3, 8)]; // ♠10
+    current.hands.W = [getCard(3, 7)]; // ♠9
+    current.collected.S = [TRANSFORMER];
+    current.collected.E = [];
+    current.collected.N = [];
+    current.collected.W = [];
+    current.leader = 'S';
+    current.nextPlayer = 'S';
+    current.currentTrick = {
+      leader: 'S',
+      plays: [],
+      winner: null,
+      points: 0,
+      firstLedSuit: null,
+      isFirstLed: false,
+    };
+
+    store.setAutoPilot(true);
+    vi.advanceTimersByTime(3300);
+    expect(store.earlyConclusion?.reason).toBe('TOP_CARDS');
+
+    vi.advanceTimersByTime(2500);
+    expect(store.phase).toBe('scoring');
+    // 领出者收下剩余 ♥4/♥3/♥2，变压器不再是独拿
+    expect(store.deal?.collected.S).toEqual(
+      expect.arrayContaining([getCard(2, 2), getCard(2, 1), getCard(2, 0)]),
+    );
+    const breakdown = store.deal!.score!.breakdowns.S;
+    expect(breakdown.transformerSolo).toBe(false);
+    expect(breakdown.final).toBe(0);
   });
 
   it('全托管可以连续打完多局并进入盘终结算', () => {
