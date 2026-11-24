@@ -2,6 +2,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { KEY_CARD_SHORT, cardLabel, getSuit, isKeyCard, type SuitIndex } from '../models/card';
 import { sortHand } from '../core/rules';
+import type { PlayRecommendation } from '../core/aiExplain';
 import type { Position } from '../models/game';
 import PlayingCard from './PlayingCard.vue';
 import TurnArrow from './TurnArrow.vue';
@@ -30,8 +31,12 @@ const props = withDefaults(
     showTurnArrow?: boolean;
     /** 系统推荐出的牌：在该牌上方显示闪烁箭头 */
     recommendedCard?: number | null;
+    /** 推荐出牌的评分明细与理由；悬停推荐牌时显示 */
+    recommendation?: PlayRecommendation | null;
     /** 亮牌读秒：显示在所有可亮牌的中央 */
     countdown?: number | null;
+    /** 出牌读秒：自己的牌显示在推荐牌上，其他玩家显示在中间牌背 */
+    playCountdown?: number | null;
     /** 紧凑模式（用于结算弹窗等） */
     compact?: boolean;
   }>(),
@@ -46,7 +51,9 @@ const props = withDefaults(
     lightingMode: false,
     showTurnArrow: false,
     recommendedCard: null,
+    recommendation: null,
     countdown: null,
+    playCountdown: null,
     compact: false,
   },
 );
@@ -119,12 +126,57 @@ function onCardDblClick(card: number): void {
    这样无论关键牌分散在哪些花色，读秒都落在“可亮牌”的中央。 */
 const handEl = ref<HTMLElement | null>(null);
 const cardSlots = new Map<number, HTMLElement>();
+const backSlots = new Map<number, HTMLElement>();
+/** 当前悬停的推荐牌；只有推荐牌才显示解释浮层 */
+const hoveredRecommendationCard = ref<number | null>(null);
+
+function onCardMouseEnter(card: number): void {
+  if (props.recommendedCard === card && props.recommendation?.card === card) {
+    hoveredRecommendationCard.value = card;
+  }
+}
+
+function onCardMouseLeave(card: number): void {
+  if (hoveredRecommendationCard.value === card) hoveredRecommendationCard.value = null;
+}
+
+watch(
+  () => `${props.recommendedCard}|${props.recommendation?.card ?? ''}|${props.cards.join(',')}`,
+  () => {
+    hoveredRecommendationCard.value = null;
+  },
+);
 const countdownPosition = ref<{ left: number; top: number } | null>(null);
+const playCountdownPosition = ref<{ left: number; top: number } | null>(null);
+const playCountdownAnchor = ref<'recommended' | 'middle' | null>(null);
 let resizeObserver: ResizeObserver | null = null;
 
 function setCardSlotRef(card: number, el: unknown): void {
   if (el instanceof HTMLElement) cardSlots.set(card, el);
   else cardSlots.delete(card);
+}
+
+function setBackSlotRef(index: number, el: unknown): void {
+  if (el instanceof HTMLElement) backSlots.set(index, el);
+  else backSlots.delete(index);
+}
+
+/** 取一组牌的中心点：奇数取正中一张，偶数取中间两张的中点。 */
+function middleAnchor(rects: DOMRect[]): { x: number; y: number } | null {
+  if (rects.length === 0) return null;
+  const centers = rects
+    .map((rect) => ({
+      x: (rect.left + rect.right) / 2,
+      y: (rect.top + rect.bottom) / 2,
+    }))
+    .sort((a, b) => a.x - b.x);
+  const middle = centers.length / 2;
+  return centers.length % 2 === 1
+    ? centers[Math.floor(middle)]
+    : {
+        x: (centers[middle - 1].x + centers[middle].x) / 2,
+        y: (centers[middle - 1].y + centers[middle].y) / 2,
+      };
 }
 
 function updateCountdownPosition(): void {
@@ -149,26 +201,74 @@ function updateCountdownPosition(): void {
   }
 
   const rootRect = root.getBoundingClientRect();
-  // 按位置排序后取中间的可亮牌作为锚点：奇数张取正中一张，
-  // 偶数张取中间两张的中点。这样读秒不会落在一堆无关牌上。
-  const centers = rects
-    .map((rect) => ({
-      x: (rect.left + rect.right) / 2,
-      y: (rect.top + rect.bottom) / 2,
-    }))
-    .sort((a, b) => a.x - b.x);
-  const middle = centers.length / 2;
-  const anchor =
-    centers.length % 2 === 1
-      ? centers[Math.floor(middle)]
-      : {
-          x: (centers[middle - 1].x + centers[middle].x) / 2,
-          y: (centers[middle - 1].y + centers[middle].y) / 2,
-        };
+  // 奇数张取正中一张，偶数张取中间两张的中点，避免落在无关牌上。
+  const anchor = middleAnchor(rects);
+  if (!anchor) {
+    countdownPosition.value = null;
+    return;
+  }
   countdownPosition.value = {
     left: anchor.x - rootRect.left,
     top: anchor.y - rootRect.top,
   };
+}
+
+/* 出牌读秒定位：自己的牌以推荐牌为锚点，其他玩家以中间一张牌背为锚点。 */
+function updatePlayCountdownPosition(): void {
+  const root = handEl.value;
+  if (!root || props.playCountdown == null) {
+    playCountdownPosition.value = null;
+    playCountdownAnchor.value = null;
+    return;
+  }
+
+  const rootRect = root.getBoundingClientRect();
+  let anchor: { x: number; y: number } | null = null;
+  let kind: 'recommended' | 'middle' | null = null;
+
+  // 自己的回合：优先落在系统推荐的牌上。
+  if (props.recommendedCard != null) {
+    const rect = cardSlots.get(props.recommendedCard)?.getBoundingClientRect();
+    if (rect) {
+      anchor = { x: (rect.left + rect.right) / 2, y: rect.top };
+      kind = 'recommended';
+    }
+  }
+
+  // 其他玩家：落在中间一张未翻开的牌背上。
+  if (!anchor && props.faceDown) {
+    const rects = props.cards
+      .map((_, index) => backSlots.get(index)?.getBoundingClientRect())
+      .filter((rect): rect is DOMRect => !!rect);
+    anchor = middleAnchor(rects);
+    kind = anchor ? 'middle' : null;
+  }
+
+  // 兜底：翻牌展示或托管时没有推荐牌，落在当前手牌中央。
+  if (!anchor) {
+    const rects = props.cards
+      .map((card) => cardSlots.get(card)?.getBoundingClientRect())
+      .filter((rect): rect is DOMRect => !!rect);
+    anchor = middleAnchor(rects);
+    kind = anchor ? 'middle' : null;
+  }
+
+  if (!anchor) {
+    playCountdownPosition.value = null;
+    playCountdownAnchor.value = null;
+    return;
+  }
+
+  playCountdownAnchor.value = kind;
+  playCountdownPosition.value = {
+    left: anchor.x - rootRect.left,
+    top: anchor.y - rootRect.top,
+  };
+}
+
+function updateAllCountdownPositions(): void {
+  updateCountdownPosition();
+  updatePlayCountdownPosition();
 }
 
 watch(
@@ -178,17 +278,25 @@ watch(
   },
 );
 
+watch(
+  () =>
+    `${props.playCountdown}|${props.recommendedCard}|${props.faceDown}|${props.cards.join(',')}`,
+  () => {
+    void nextTick(updatePlayCountdownPosition);
+  },
+);
+
 onMounted(() => {
-  void nextTick(updateCountdownPosition);
-  window.addEventListener('resize', updateCountdownPosition);
+  void nextTick(updateAllCountdownPositions);
+  window.addEventListener('resize', updateAllCountdownPositions);
   if (typeof ResizeObserver !== 'undefined' && handEl.value) {
-    resizeObserver = new ResizeObserver(updateCountdownPosition);
+    resizeObserver = new ResizeObserver(updateAllCountdownPositions);
     resizeObserver.observe(handEl.value);
   }
 });
 
 onBeforeUnmount(() => {
-  window.removeEventListener('resize', updateCountdownPosition);
+  window.removeEventListener('resize', updateAllCountdownPositions);
   resizeObserver?.disconnect();
   resizeObserver = null;
 });
@@ -199,20 +307,58 @@ onBeforeUnmount(() => {
   <div ref="handEl" class="hand" :class="[{ active, compact, empty: cards.length === 0 }, `pos-${position}`]">
     <TurnArrow v-if="showTurnArrow && recommendedCard == null" :position="position" />
     <div v-if="faceDown" class="cards backs">
-      <PlayingCard v-for="i in cards.length" :key="i" back size="xxl" />
+      <span
+        v-for="(_, index) in cards"
+        :key="index"
+        class="back-slot"
+        :ref="(el) => setBackSlotRef(index, el)"
+      >
+        <PlayingCard back size="xxl" />
+      </span>
       <span v-if="cards.length === 0" class="empty-hand">无牌</span>
     </div>
 
     <div v-else class="suits single-row" :class="{ clickable, 'no-events': !clickable }">
       <div class="hand-row">
         <span v-for="group in groups" :key="group.suit" class="suit-group">
-          <span v-for="card in group.cards" :key="card" class="card-slot" :class="cardClass(card)" :ref="(el) => setCardSlotRef(card, el)">
+          <span
+            v-for="card in group.cards"
+            :key="card"
+            class="card-slot"
+            :class="[cardClass(card), { 'recommended-slot': recommendedCard === card }]"
+            :ref="(el) => setCardSlotRef(card, el)"
+            @mouseenter="onCardMouseEnter(card)"
+            @mouseleave="onCardMouseLeave(card)"
+          >
             <TurnArrow
               v-if="recommendedCard === card"
               variant="card"
               :position="position"
               label="推荐出牌"
             />
+            <div
+              v-if="
+                recommendedCard === card &&
+                hoveredRecommendationCard === card &&
+                recommendation &&
+                recommendation.card === card
+              "
+              class="recommend-tip"
+              role="tooltip"
+            >
+              <div class="recommend-tip-head">
+                <span class="recommend-tip-card">{{ recommendation.title }}</span>
+                <span class="recommend-tip-note">AI 推荐理由</span>
+              </div>
+              <ul class="recommend-tip-reasons">
+                <li v-for="(reason, index) in recommendation.reasons" :key="index">
+                  {{ reason }}
+                </li>
+              </ul>
+              <p v-if="recommendation.inference" class="recommend-tip-inference">
+                {{ recommendation.inference }}
+              </p>
+            </div>
             <span
               v-if="lightingMode && isKeyCard(card)"
               class="light-flag"
@@ -247,6 +393,17 @@ onBeforeUnmount(() => {
     >
       <strong>{{ countdown }}</strong><span>s</span>
     </div>
+
+    <div
+      v-if="playCountdown != null && playCountdownPosition"
+      class="play-countdown"
+      :class="`anchor-${playCountdownAnchor}`"
+      :data-anchor="playCountdownAnchor"
+      :style="{ left: `${playCountdownPosition.left}px`, top: `${playCountdownPosition.top}px` }"
+      aria-live="off"
+    >
+      <strong>{{ playCountdown }}</strong><span>s</span>
+    </div>
   </div>
 </template>
 
@@ -274,8 +431,9 @@ onBeforeUnmount(() => {
   display: none;
 }
 
-/* 亮牌读秒：浮在仍可点选的“可亮”牌组正中（中间一张或中间两张之间） */
-.light-countdown {
+/* 亮牌/出牌读秒：浮在锚点牌的正中（奇数张取中间一张，偶数张取中点） */
+.light-countdown,
+.play-countdown {
   position: absolute;
   z-index: 40;
   display: flex;
@@ -293,14 +451,21 @@ onBeforeUnmount(() => {
   font-variant-numeric: tabular-nums;
   pointer-events: none;
 }
-.light-countdown strong {
+.light-countdown strong,
+.play-countdown strong {
   font-size: clamp(24px, 2.4vw, 34px);
   font-weight: 900;
   line-height: 1;
 }
-.light-countdown span {
+.light-countdown span,
+.play-countdown span {
   font-size: 13px;
   font-weight: 800;
+}
+/* 推荐牌读秒贴住牌的上沿，避免遮住牌面中央；其他座位落在牌背正中。 */
+.play-countdown.anchor-recommended {
+  background: rgba(64, 32, 0, 0.88);
+  border-color: rgba(255, 176, 64, 0.9);
 }
 
 .hand :deep(.size-xxl) {
@@ -366,6 +531,80 @@ onBeforeUnmount(() => {
 }
 .card-slot :deep(.turn-arrow) {
   z-index: 30;
+}
+
+/* 推荐牌只作为标记，不抬升层级：保持正常叠牌顺序，
+   避免它盖住右侧相邻牌、让玩家点不到其他合法牌。 */
+.card-slot.recommended-slot {
+  z-index: auto;
+}
+.recommend-tip {
+  position: absolute;
+  z-index: 100;
+  left: 50%;
+  bottom: calc(100% + 30px);
+  width: max-content;
+  max-width: min(380px, 72vw);
+  transform: translateX(-50%);
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 214, 102, 0.82);
+  background:
+    linear-gradient(180deg, rgba(52, 38, 10, 0.98), rgba(24, 18, 5, 0.98));
+  color: #ffefd0;
+  box-shadow:
+    0 0 22px rgba(255, 190, 70, 0.28),
+    0 10px 28px rgba(0, 0, 0, 0.55);
+  font-size: 12px;
+  line-height: 1.5;
+  text-align: left;
+  white-space: normal;
+  pointer-events: none;
+}
+.recommend-tip::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 100%;
+  width: 0;
+  height: 0;
+  margin-left: -6px;
+  border-left: 6px solid transparent;
+  border-right: 6px solid transparent;
+  border-top: 7px solid rgba(255, 214, 102, 0.82);
+}
+.recommend-tip-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  padding-bottom: 5px;
+  border-bottom: 1px solid rgba(255, 214, 102, 0.28);
+}
+.recommend-tip-card {
+  color: #ffe19a;
+  font-size: 13px;
+  font-weight: 900;
+}
+.recommend-tip-note {
+  color: rgba(255, 239, 208, 0.55);
+  font-size: 10px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.recommend-tip-reasons {
+  margin: 6px 0 0;
+  padding-left: 16px;
+}
+.recommend-tip-reasons li + li {
+  margin-top: 3px;
+}
+.recommend-tip-inference {
+  margin: 7px 0 0;
+  padding-top: 6px;
+  border-top: 1px dashed rgba(255, 214, 102, 0.28);
+  color: rgba(255, 239, 208, 0.72);
+  font-size: 11px;
 }
 
 .suits.no-events {
@@ -508,7 +747,12 @@ onBeforeUnmount(() => {
   min-height: var(--hand-card-h);
   padding-left: 2px;
 }
-.cards.backs .playing-card + .playing-card {
+.back-slot {
+  position: relative;
+  display: flex;
+  flex: none;
+}
+.cards.backs .back-slot + .back-slot {
   margin-left: var(--card-overlap);
 }
 .empty-hand {

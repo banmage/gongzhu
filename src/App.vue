@@ -65,15 +65,6 @@ function onAutoPilot(value: boolean): void {
         {{ store.message }}
       </div>
 
-      <!-- 亮牌读秒显示在南家可亮牌中央，顶栏只保留出牌读秒 -->
-      <span
-        v-if="store.phase !== 'lighting' && store.countdownText !== '—'"
-        class="header-timer"
-        aria-live="off"
-      >
-        {{ store.countdownText }}
-      </span>
-
       <label class="pilot-switch" title="开启后南家也由概率团队策略 AI 操作，用于全机器演示">
         <el-switch :model-value="store.autoPilot" size="small" @update:model-value="onAutoPilot" />
         <span>托管南家</span>
@@ -139,20 +130,6 @@ function onAutoPilot(value: boolean): void {
 .status-sep {
   margin: 0 3px;
   color: rgba(234, 245, 238, 0.5);
-}
-/* 读秒放在顶栏，不占用牌桌幅面 */
-.header-timer {
-  flex: none;
-  min-width: 42px;
-  padding: 2px 8px;
-  border-radius: 999px;
-  background: rgba(255, 214, 102, 0.16);
-  border: 1px solid rgba(255, 214, 102, 0.45);
-  color: #ffe19a;
-  font-size: 13px;
-  font-variant-numeric: tabular-nums;
-  font-weight: 800;
-  text-align: center;
 }
 .pilot-switch {
   display: flex;

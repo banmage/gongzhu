@@ -27,6 +27,11 @@ const playNoCountdown = computed({
     store.config.playSeconds = value ? 0 : 20;
   },
 });
+/** 四家 AI 全自动演示：南家也交给概率团队策略托管 */
+const allAiPilot = computed({
+  get: () => store.autoPilot,
+  set: (value: boolean) => store.setAutoPilot(value),
+});
 
 function start(): void {
   const raw = seedText.value.trim();
@@ -176,7 +181,10 @@ function start(): void {
         <div class="seat-list">
           <div class="seat-line a">
             <span class="seat-avatar">南</span>
-            <span class="seat-info"><strong>南家（你）</strong><small>A队 · 人类玩家</small></span>
+            <span class="seat-info">
+              <strong>{{ allAiPilot ? '南家' : '南家（你）' }}</strong>
+              <small>{{ allAiPilot ? 'A队 · 概率团队 AI（托管）' : 'A队 · 人类玩家' }}</small>
+            </span>
           </div>
           <div class="seat-line a">
             <span class="seat-avatar">北</span>
@@ -191,7 +199,16 @@ function start(): void {
             <span class="seat-info"><strong>西家</strong><small>B队 · 概率团队 AI</small></span>
           </div>
         </div>
-        <p class="seat-note">出牌顺序逆时针：南 → 东 → 北 → 西。可在对局中开启“托管南家”做全机器演示。</p>
+        <label class="all-ai-toggle">
+          <el-switch v-model="allAiPilot" size="small" />
+          <span>
+            <strong>四家 AI 全自动演示</strong>
+            <small>开启后南家也由概率团队策略 AI 托管，可完整跑完发牌、亮牌、出牌与结算。</small>
+          </span>
+        </label>
+        <p class="seat-note">
+          出牌顺序逆时针：南 → 东 → 北 → 西。也可在对局中随时开启顶栏“托管南家”。
+        </p>
       </section>
 
       <section class="start-card flow-card">
@@ -617,6 +634,32 @@ function start(): void {
   color: #7a8a80;
   font-size: 10px;
   line-height: 1.55;
+}
+
+.all-ai-toggle {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin-top: 8px;
+  padding: 7px 9px;
+  border-radius: 8px;
+  background: rgba(47, 125, 87, 0.08);
+  border: 1px dashed rgba(47, 125, 87, 0.38);
+  cursor: pointer;
+}
+.all-ai-toggle > span {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.all-ai-toggle strong {
+  color: #23382c;
+  font-size: 11px;
+}
+.all-ai-toggle small {
+  color: #7a8a80;
+  font-size: 10px;
+  line-height: 1.45;
 }
 
 .flow-list {

@@ -126,7 +126,7 @@ function close(): void {
 
       <p class="lr-tip">
         本面板仅面向系统管理员。规则严格对应
-        <code>rules/拱猪亮牌规则_V1.0.md</code> 第 10 节参数；应用后立即替换内存中的激活规则，
+        <code>docs/拱猪亮牌规则_V1.0.md</code> 第 10 节参数；应用后立即替换内存中的激活规则，
         无需刷新页面。未填写的字段自动沿用内置 V1.0 默认值。
       </p>
 
@@ -156,7 +156,7 @@ function close(): void {
           <li><code>meta.version / meta.s_ref</code>：规则版本与相对分值尺度。</li>
           <li><code>branches</code>：殉爆 / 绝境 / 冲锋 / 禁羊阈值。</li>
           <li><code>module_a</code>：相对分值基准概率与分支目标值。</li>
-          <li><code>module_b</code>：张数、牌点、控牌、单张黑桃、零风险变压器。</li>
+          <li><code>module_b</code>：张数、牌点、控牌、单张黑桃、零风险变压器、短套结构奖励（<code>shape_bonus</code>）。</li>
           <li><code>module_c</code>：满贯修正；默认关闭，启用时需提供可复现估算器。</li>
           <li><code>module_d</code>：阈值、单局上限、互斥系数。</li>
           <li><code>sampling.mode</code>：<code>random</code> 可复现随机采样；<code>threshold</code> 达到阈值即亮。</li>

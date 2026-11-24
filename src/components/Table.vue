@@ -169,6 +169,7 @@ const teamScoreText = computed(() => ({
         :active="isActive('N')"
         :clickable="false"
         :show-turn-arrow="showTurnArrow('N')"
+        :play-countdown="store.playCountdownFor('N')"
       />
       <CollectedArea
         v-if="isPlaying || store.phase === 'scoring'"
@@ -255,6 +256,7 @@ const teamScoreText = computed(() => ({
         :active="isActive('W')"
         :clickable="false"
         :show-turn-arrow="showTurnArrow('W')"
+        :play-countdown="store.playCountdownFor('W')"
       />
       <CollectedArea
         v-if="isPlaying || store.phase === 'scoring'"
@@ -397,6 +399,7 @@ const teamScoreText = computed(() => ({
         :active="isActive('E')"
         :clickable="false"
         :show-turn-arrow="showTurnArrow('E')"
+        :play-countdown="store.playCountdownFor('E')"
       />
       <CollectedArea
         v-if="isPlaying || store.phase === 'scoring'"
@@ -431,7 +434,9 @@ const teamScoreText = computed(() => ({
             :lighting-mode="isLighting && !store.humanSubmittedLight"
             :show-turn-arrow="showTurnArrow('S')"
             :recommended-card="store.recommendedCard"
+            :recommendation="store.playRecommendation"
             :countdown="showLightCountdown ? store.lightCountdown : null"
+            :play-countdown="store.playCountdownFor('S')"
             @card-click="(card) => onCardClick('S', card)"
             @card-confirm="(card) => onCardConfirm('S', card)"
             @card-dblclick="(card) => onCardDoubleClick('S', card)"

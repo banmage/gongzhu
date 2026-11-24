@@ -137,6 +137,100 @@ describe('亮牌规则 V1.0：模块 B 牌型修正', () => {
   });
 });
 
+describe('亮牌规则 V1.0：短套结构奖励（低负分风险搏杀）', () => {
+  // 以下牌型都满足“无大红桃（J 及以上）、无猪圈（♠A/K）”，并留出单缺花色。
+  const lowHearts = [getCard(2, 0), getCard(2, 1), getCard(2, 2), getCard(2, 3)];
+  const lowSpades = [getCard(3, 0), getCard(3, 1), getCard(3, 2), getCard(3, 3)];
+  const lowDiamonds = [getCard(1, 0), getCard(1, 1), getCard(1, 2), getCard(1, 3)];
+  const lowClubs = [getCard(0, 0), getCard(0, 1), getCard(0, 2), getCard(0, 3)];
+
+  const trans2 = [TRANSFORMER, getCard(0, 0), ...lowSpades, ...lowDiamonds, ...lowHearts.slice(0, 3)];
+  const trans3 = [TRANSFORMER, getCard(0, 0), getCard(0, 1), ...lowSpades, ...lowDiamonds, ...lowHearts.slice(0, 2)];
+  const sheep3 = [SHEEP, getCard(1, 0), getCard(1, 1), ...lowSpades, ...lowClubs.slice(0, 3), ...lowHearts.slice(0, 3)];
+  const pig4 = [PIG, getCard(3, 0), getCard(3, 1), getCard(3, 2), ...lowDiamonds, ...lowHearts, getCard(0, 0)];
+  const hA4 = [HEART_A, getCard(2, 0), getCard(2, 1), getCard(2, 2), ...lowDiamonds, ...lowSpades, getCard(0, 0)];
+
+  it('2 张草花含 ♣10 时给出 1.80 下限并在常规分支推荐亮变压器', () => {
+    const result = decide(trans2);
+    expect(result.debug.flag).toBe('normal');
+    expect(result.debug.F_card.trans ?? 0).toBeGreaterThanOrEqual(1.8);
+    expect(result.keys).toContain('trans');
+  });
+
+  it('3 张草花含 ♣10 + ♣2/♣3 时给出 1.80 下限并推荐亮变压器', () => {
+    const result = decide(trans3);
+    expect(result.debug.F_card.trans ?? 0).toBeGreaterThanOrEqual(1.8);
+    expect(result.keys).toContain('trans');
+  });
+
+  it('恰好 3 张方片含 ♦J 时给出 1.00 下限并推荐亮羊', () => {
+    const result = decide(sheep3);
+    expect(result.debug.F_card.sheep ?? 0).toBeGreaterThanOrEqual(1.0);
+    expect(result.keys).toContain('sheep');
+  });
+
+  it('4 张黑桃含 ♠Q 且另有单缺花色时给出 2.20 下限并推荐亮猪', () => {
+    const result = decide(pig4);
+    expect(result.debug.F_card.pig ?? 0).toBeGreaterThanOrEqual(2.2);
+    expect(result.keys).toContain('pig');
+  });
+
+  it('4 张红桃含 ♥A 且另有单缺花色时给出 3.00 下限并推荐亮红桃 A', () => {
+    const result = decide(hA4);
+    expect(result.debug.F_card.hA ?? 0).toBeGreaterThanOrEqual(3.0);
+    expect(result.keys).toContain('hA');
+  });
+
+  it('存在大红桃或猪圈时不触发结构奖励', () => {
+    const transBigHeart = decide([
+      TRANSFORMER, getCard(0, 0), getCard(2, 9),
+      ...lowSpades, ...lowDiamonds, ...lowHearts.slice(0, 2),
+    ]);
+    expect(transBigHeart.debug.F_card.trans ?? 0).toBeLessThan(1.8);
+
+    const pigPen = decide([
+      PIG, getCard(3, 12), getCard(3, 1), getCard(3, 2),
+      ...lowDiamonds, ...lowHearts, getCard(0, 0),
+    ]);
+    expect(pigPen.debug.F_card.pig ?? 0).toBeLessThan(2.2);
+  });
+
+  it('张数或低牌不满足时不触发结构奖励', () => {
+    const transNoLow = decide([
+      TRANSFORMER, getCard(0, 5), getCard(0, 6),
+      ...lowSpades, ...lowDiamonds, ...lowHearts.slice(0, 2),
+    ]);
+    expect(transNoLow.debug.F_card.trans ?? 0).toBeLessThan(1.8);
+
+    const sheep4 = decide([
+      SHEEP, getCard(1, 0), getCard(1, 1), getCard(1, 2),
+      ...lowSpades, ...lowClubs.slice(0, 3), ...lowHearts.slice(0, 2),
+    ]);
+    expect(sheep4.debug.F_card.sheep ?? 0).toBeLessThan(1.0);
+  });
+
+  it('没有其他单缺花色时不触发 4 张猪/红桃 A 奖励', () => {
+    const pigNoShort = decide([
+      PIG, getCard(3, 0), getCard(3, 1), getCard(3, 2),
+      ...lowDiamonds, ...lowHearts.slice(0, 3), ...lowClubs.slice(0, 2),
+    ]);
+    expect(pigNoShort.debug.F_card.pig ?? 0).toBeLessThan(2.2);
+
+    const hANoShort = decide([
+      HEART_A, getCard(2, 0), getCard(2, 1), getCard(2, 2),
+      ...lowDiamonds, ...lowSpades.slice(0, 3), ...lowClubs.slice(0, 2),
+    ]);
+    expect(hANoShort.debug.F_card.hA ?? 0).toBeLessThan(3.0);
+  });
+
+  it('shape_bonus.enabled 关闭后不再应用结构奖励', () => {
+    const result = decide(trans2, { rule: thresholdRule((rule) => {
+      rule.module_b.shape_bonus.enabled = false;
+    }) });
+    expect(result.debug.F_card.trans ?? 0).toBeLessThan(1.8);
+  });
+});
+
 describe('亮牌规则 V1.0：模块 A 的下游约束（5.4）', () => {
   it('殉爆分支对变压器与红桃 A 的牌型因子设 1.0 下限', () => {
     const hand = [HEART_A, TRANSFORMER, getCard(0, 1), getCard(2, 1)];

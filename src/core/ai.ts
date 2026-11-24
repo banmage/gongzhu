@@ -17,6 +17,13 @@ import { buildPublicKnowledge } from './aiKnowledge';
 import { estimateThreats } from './aiThreat';
 import { choosePolicyPlay } from './aiPolicy';
 
+export { recommendPlay } from './aiExplain';
+export type {
+  PlayAlternative,
+  PlayRecommendation,
+  RecommendPlayOptions,
+} from './aiExplain';
+
 /* ------------------------------------------------------------------ *
  * 亮牌 AI
  * ------------------------------------------------------------------ */

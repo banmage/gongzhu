@@ -45,7 +45,12 @@ import {
   type DealConclusion,
 } from '../core/rules';
 import { scoreDeal } from '../core/scoring';
-import { chooseLights, choosePlay } from '../core/ai';
+import {
+  chooseLights,
+  choosePlay,
+  recommendPlay,
+  type PlayRecommendation,
+} from '../core/ai';
 import { buildPlayObservation, type PlayObservation } from '../core/aiObservation';
 import {
   activateLightRule,
@@ -287,6 +292,17 @@ export const useGameStore = defineStore('gongzhu', () => {
       isHumanTurn.value,
   );
 
+  /**
+   * 指定座位的出牌读秒。
+   * 自己的读秒显示在推荐牌上；其他座位的读秒显示在中间牌背上。
+   */
+  function playCountdownFor(pos: Position): number | null {
+    const current = deal.value;
+    if (!current || phase.value !== 'playing' || settling.value) return null;
+    if (config.playSeconds <= 0 || !isFinalCountdown(countdown.value)) return null;
+    return current.nextPlayer === pos ? countdown.value : null;
+  }
+
   const dealResultVisible = computed(() => phase.value === 'scoring' && !!deal.value?.score);
   /** 结算弹窗是否展开：关闭后仍可再次打开 */
   const dealResultOpen = computed(() => dealResultVisible.value && !dealResultDismissed.value);
@@ -467,18 +483,22 @@ export const useGameStore = defineStore('gongzhu', () => {
   });
 
   /**
-   * 轮到南家出牌时，实时给出系统推荐的出牌（界面用闪烁箭头指向该牌）。
+   * 轮到南家出牌时，实时给出系统推荐的出牌、评分明细和公开信息推断。
    * 计算属性带缓存，同一手牌状态下推荐结果稳定，不会因为无关重绘而闪烁。
    */
-  const recommendedCard = computed<number | null>(() => {
+  const playRecommendation = computed<PlayRecommendation | null>(() => {
     const current = deal.value;
     if (!current || phase.value !== 'playing' || settling.value) return null;
     if (current.nextPlayer !== 'S' || isAiSeat('S')) return null;
     const legal = legalCards.value;
     if (legal.length === 0) return null;
-    if (hintCard.value !== null && legal.includes(hintCard.value)) return hintCard.value;
-    return choosePlay(playObservationFor('S', legal));
+    const preferred =
+      hintCard.value !== null && legal.includes(hintCard.value) ? hintCard.value : undefined;
+    return recommendPlay(playObservationFor('S', legal), { preferredCard: preferred });
   });
+
+  /** 界面用闪烁箭头指向的推荐牌。 */
+  const recommendedCard = computed<number | null>(() => playRecommendation.value?.card ?? null);
 
   /* ------------------------------------------------------------------ *
    * 开局 / 局 / 副
@@ -860,11 +880,11 @@ export const useGameStore = defineStore('gongzhu', () => {
   function startPlayCountdown(): void {
     clearPlayCountdown();
     const current = deal.value;
-    if (!current || phase.value !== 'playing') return;
-    if (isAiSeat(current.nextPlayer) || config.playSeconds <= 0) {
+    if (!current || phase.value !== 'playing' || config.playSeconds <= 0) {
       countdown.value = 0;
       return;
     }
+    // AI 座位也启动读秒，仅用于界面展示；实际出牌仍由 AI 调度器负责。
     countdown.value = config.playSeconds;
     announcePlayCountdown();
     playCountdownTimer = setInterval(() => {
@@ -874,6 +894,7 @@ export const useGameStore = defineStore('gongzhu', () => {
         const live = deal.value;
         if (!live || phase.value !== 'playing' || settling.value) return;
         const pos = live.nextPlayer;
+        if (isAiSeat(pos)) return;
         const legal = legalCardsFor(pos);
         if (legal.length > 0) {
           const card = pickTimeoutCard(legal);
@@ -1494,6 +1515,7 @@ export const useGameStore = defineStore('gongzhu', () => {
     isHumanTurn,
     lightCountdownVisible,
     playCountdownVisible,
+    playCountdownFor,
     dealResultVisible,
     dealResultOpen,
     matchResultVisible,
@@ -1507,6 +1529,7 @@ export const useGameStore = defineStore('gongzhu', () => {
     countdownText,
     hintText,
     recommendedCard,
+    playRecommendation,
     keyCardStates,
     roundSummaryText,
     nextStepLabel,

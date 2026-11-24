@@ -4,11 +4,13 @@ import { createPinia, setActivePinia } from 'pinia';
 import ElementPlus from 'element-plus';
 import { nextTick } from 'vue';
 import App from '../App.vue';
+import Hand from '../components/Hand.vue';
 import LitArea from '../components/LitArea.vue';
 import { useGameStore } from '../store/game';
 import { HEART_A, PIG, SHEEP, TRANSFORMER, getCard, getSuit, isKeyCard, isScoringCard } from '../models/card';
 import { ALL_POSITIONS, formatSigned, scoreSignClass, seatName } from '../models/game';
 import { scoreDeal } from '../core/scoring';
+import type { PlayRecommendation } from '../core/aiExplain';
 
 /** 结算弹窗中某座位的计分明细卡片 */
 function findBreakdownCard(seat: string): Element {
@@ -292,6 +294,159 @@ describe('UI 冒烟测试', () => {
     expect(wrapper.find('.south .hand .light-countdown').exists()).toBe(true);
 
     store.returnToIdle();
+    wrapper.unmount();
+  });
+
+  it('出牌读秒：自己的落在推荐牌上，其他玩家落在中间牌背正中', async () => {
+    const cards = [
+      getCard(3, 12),
+      getCard(3, 8),
+      getCard(2, 6),
+      getCard(1, 4),
+      getCard(0, 2),
+    ];
+
+    const own = mount(Hand, {
+      props: {
+        cards,
+        position: 'S',
+        recommendedCard: cards[2],
+        playCountdown: 10,
+      },
+    });
+    await nextTick();
+    await nextTick();
+    const ownBadge = own.find('.play-countdown');
+    expect(ownBadge.exists()).toBe(true);
+    expect(ownBadge.attributes('data-anchor')).toBe('recommended');
+    own.unmount();
+
+    const other = mount(Hand, {
+      props: {
+        cards,
+        position: 'E',
+        faceDown: true,
+        playCountdown: 10,
+      },
+    });
+    await nextTick();
+    await nextTick();
+    const otherBadge = other.find('.play-countdown');
+    expect(otherBadge.exists()).toBe(true);
+    expect(otherBadge.attributes('data-anchor')).toBe('middle');
+    other.unmount();
+  });
+
+  it('出牌读秒不出现在顶栏', async () => {
+    const wrapper = mount(App, { global: { plugins: [ElementPlus] } });
+    const store = useGameStore();
+    store.config.playSeconds = 10;
+    store.startMatch(5, 424242);
+    vi.advanceTimersByTime(2000);
+    await nextTick();
+
+    if (!store.humanSubmittedLight) store.submitHumanLight([]);
+    for (let i = 0; i < 200 && !store.isHumanTurn; i++) {
+      vi.advanceTimersByTime(100);
+    }
+    await nextTick();
+    await nextTick();
+    await nextTick();
+
+    expect(store.isHumanTurn).toBe(true);
+    expect(store.playRecommendation).not.toBeNull();
+    expect(store.legalCards).toContain(store.playRecommendation!.card);
+    expect(store.playCountdownFor('S')).not.toBeNull();
+    expect(wrapper.find('.south .hand .play-countdown').exists()).toBe(true);
+    expect(wrapper.find('.app-header .header-timer').exists()).toBe(false);
+
+    // 切换到其他玩家：读秒移到该玩家的中间牌背，南家读秒消失
+    store.deal!.nextPlayer = 'E';
+    await nextTick();
+    await nextTick();
+    await nextTick();
+    expect(store.playCountdownFor('E')).not.toBeNull();
+    expect(wrapper.find('.east .hand .play-countdown').exists()).toBe(true);
+    expect(wrapper.find('.south .hand .play-countdown').exists()).toBe(false);
+
+    store.returnToIdle();
+    wrapper.unmount();
+  });
+
+  it('推荐牌只做箭头标记，其他合法牌仍可点击出牌', async () => {
+    const cards = [
+      getCard(3, 12),
+      getCard(3, 8),
+      getCard(2, 6),
+      getCard(1, 4),
+      getCard(0, 2),
+    ];
+    const wrapper = mount(Hand, {
+      props: {
+        cards,
+        position: 'S',
+        clickable: true,
+        legalCards: cards,
+        recommendedCard: cards[2],
+      },
+    });
+
+    expect(wrapper.findAll('.card-slot.recommended-slot')).toHaveLength(1);
+    const other = wrapper
+      .findAll('.card-slot')
+      .find((slot) => !slot.classes().includes('recommended-slot'));
+    expect(other).toBeTruthy();
+    await other!.find('button').trigger('click');
+
+    const emitted = wrapper.emitted('card-click');
+    expect(emitted).toHaveLength(1);
+    expect(emitted![0][0]).not.toBe(cards[2]);
+
+    wrapper.unmount();
+  });
+
+  it('悬停推荐牌才显示 AI 推荐理由与公开推断', async () => {
+    const cards = [
+      getCard(3, 12),
+      getCard(3, 8),
+      getCard(2, 6),
+      getCard(1, 4),
+      getCard(0, 2),
+    ];
+    const recommendation = {
+      card: cards[2],
+      title: `推荐出 ${cards[2]}`,
+      reasons: ['优先保留控制张', '本墩我方收墩概率较高'],
+      inference: '东家缺♥；猪♠Q 仍在场上',
+    } as unknown as PlayRecommendation;
+
+    const wrapper = mount(Hand, {
+      props: {
+        cards,
+        position: 'S',
+        recommendedCard: cards[2],
+        recommendation,
+      },
+    });
+
+    expect(wrapper.find('.recommend-tip').exists()).toBe(false);
+    const recommended = wrapper.find('.card-slot.recommended-slot');
+    expect(recommended.exists()).toBe(true);
+    await recommended.trigger('mouseenter');
+    expect(wrapper.find('.recommend-tip').exists()).toBe(true);
+    expect(wrapper.text()).toContain('优先保留控制张');
+    expect(wrapper.text()).toContain('东家缺♥；猪♠Q 仍在场上');
+
+    await recommended.trigger('mouseleave');
+    expect(wrapper.find('.recommend-tip').exists()).toBe(false);
+
+    const other = wrapper
+      .findAll('.card-slot')
+      .find((slot) => !slot.classes().includes('recommended-slot'));
+    expect(other).toBeTruthy();
+    await other!.trigger('mouseenter');
+    expect(wrapper.find('.recommend-tip').exists()).toBe(false);
+
     wrapper.unmount();
   });
 

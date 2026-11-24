@@ -1,5 +1,5 @@
 /**
- * 亮牌决策引擎：严格实现 `rules/拱猪亮牌规则_V1.0.md` 的模块 A→B→C→D。
+ * 亮牌决策引擎：严格实现 `docs/拱猪亮牌规则_V1.0.md` 的模块 A→B→C→D。
  *
  * 该引擎是纯函数；规则由调用方注入（默认读取当前热插拔规则注册表），
  * 因此管理员更新规则后，下一次推荐/提交亮牌会立即使用新参数。
@@ -22,6 +22,7 @@ import {
   type LightKey,
   type LightKeyValues,
   type LightRuleConfig,
+  type ShapeBonusConfig,
 } from './lightRuleConfig';
 import { getActiveLightRule } from './lightRuleRegistry';
 
@@ -255,6 +256,105 @@ export function isZeroRiskTransformer(hand: number[]): boolean {
   return true;
 }
 
+/** 除目标关键牌外，是否还存在大红桃（默认 J 及以上）。 */
+function hasBigHeart(
+  hand: number[],
+  config: ShapeBonusConfig,
+  exclude?: number,
+): boolean {
+  return cardsOfSuit(hand, 2).some(
+    (card) => card !== exclude && getRank(card) >= config.big_heart_min_rank,
+  );
+}
+
+/** 是否持有猪圈（默认黑桃 A/K）。 */
+function hasPigPen(hand: number[], config: ShapeBonusConfig): boolean {
+  return cardsOfSuit(hand, 3).some(
+    (card) => getRank(card) >= config.pig_pen_min_rank,
+  );
+}
+
+/**
+ * 短套结构例外的“安全结构”前提：
+ * - 无大红桃；亮 ♥A 时把 ♥A 本身排除，避免目标牌自我否决；
+ * - 无猪圈（默认 ♠A/K）。
+ */
+function isSafeShapeHand(
+  hand: number[],
+  kind: LightKey,
+  config: ShapeBonusConfig,
+): boolean {
+  if (!config.enabled) return false;
+  if (hasBigHeart(hand, config, kind === 'hA' ? HEART_A : undefined)) return false;
+  if (hasPigPen(hand, config)) return false;
+  return true;
+}
+
+/** 其他花色中是否存在 0～N 张的短套（默认包含缺门与单张）。 */
+function hasShortOtherSuit(
+  hand: number[],
+  targetSuit: SuitIndex,
+  maxCards: number,
+): boolean {
+  for (const suit of [0, 1, 2, 3] as SuitIndex[]) {
+    if (suit === targetSuit) continue;
+    if (cardsOfSuit(hand, suit).length <= maxCards) return true;
+  }
+  return false;
+}
+
+/**
+ * 短套结构奖励：在“安全结构”下，对特定短套关键牌给出牌型因子下限。
+ * 只影响概率，不构成硬性亮牌；仍受模块 A 否决、下游 5.4 约束和模块 D 阈值控制。
+ */
+function shapeBonusFactor(
+  kind: LightKey,
+  hand: number[],
+  config: ShapeBonusConfig,
+): number {
+  if (!isSafeShapeHand(hand, kind, config)) return 0;
+
+  if (kind === 'trans') {
+    const clubs = cardsOfSuit(hand, 0);
+    if (!clubs.includes(TRANSFORMER)) return 0;
+    if (clubs.length === 2) return config.trans_two_clubs_floor;
+    if (
+      clubs.length === 3 &&
+      clubs.some((card) => getRank(card) <= 1)
+    ) {
+      return config.trans_three_clubs_floor;
+    }
+    return 0;
+  }
+
+  if (kind === 'sheep') {
+    const diamonds = cardsOfSuit(hand, 1);
+    return diamonds.length === 3 && diamonds.includes(SHEEP)
+      ? config.sheep_three_diamonds_floor
+      : 0;
+  }
+
+  if (kind === 'pig') {
+    const spades = cardsOfSuit(hand, 3);
+    return spades.length === 4 &&
+      spades.includes(PIG) &&
+      hasShortOtherSuit(hand, 3, config.short_suit_max_cards)
+      ? config.pig_four_spades_floor
+      : 0;
+  }
+
+  if (kind === 'hA') {
+    const hearts = cardsOfSuit(hand, 2);
+    return hearts.length === 4 &&
+      hearts.includes(HEART_A) &&
+      hasShortOtherSuit(hand, 2, config.short_suit_max_cards)
+      ? config.hA_four_hearts_floor
+      : 0;
+  }
+
+  return 0;
+}
+
 function moduleB(
   kind: LightKey,
   hand: number[],
@@ -274,7 +374,8 @@ function moduleB(
       controlFactor(hearts, rule),
       sigma(b.control.nu1 * (2 - hearts.length) + b.control.nu2 * (topCount(hearts) - 1.5)),
     );
-    return clamp(fHA * pointsFactor(hearts, rule) * control, minFactor, maxFactor);
+    const factor = clamp(fHA * pointsFactor(hearts, rule) * control, minFactor, maxFactor);
+    return Math.max(factor, shapeBonusFactor('hA', hand, b.shape_bonus));
   }
 
   const suit = KEY_SUIT[kind];
@@ -293,10 +394,11 @@ function moduleB(
   }
 
   const factor = clamp(cnt * pointsFactor(cards, rule) * controlFactor(cards, rule), minFactor, maxFactor);
+  const shapeFloor = shapeBonusFactor(kind, hand, b.shape_bonus);
   if (kind === 'trans' && isZeroRiskTransformer(hand)) {
-    return Math.max(factor, b.zero_risk_trans_floor);
+    return Math.max(factor, b.zero_risk_trans_floor, shapeFloor);
   }
-  return factor;
+  return Math.max(factor, shapeFloor);
 }
 
 function moduleC(

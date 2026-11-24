@@ -740,13 +740,100 @@ function jitter(obs: PlayObservation, card: number): number {
   return (hashSeed(obs.samplingSeed, obs.trickHistory.length, obs.currentTrick.plays.length, card) % 1000) / 1000;
 }
 
-/** 对一张候选牌做团队概率评分。分数越高越优先。 */
-export function scoreCandidate(
+/** 某张牌是否是当前花色的“场上最大张”（未见牌中已无更大牌）。 */
+export function isSuitMaster(card: number, knowledge: PublicKnowledge): boolean {
+  const suit = getSuit(card);
+  const rank = getRank(card);
+  return !knowledge.unseen.some(
+    (unseenCard) => getSuit(unseenCard) === suit && getRank(unseenCard) > rank,
+  );
+}
+
+/**
+ * 残局路线价值：用已出牌推断出的缺门、未见牌和控制张，判断当前出牌
+ * 会把下一墩的主动权交给哪一方。
+ *
+ * 这里只做轻量的一步路线修正，不模拟隐藏手牌：
+ * - 己方大概率收墩时，优先兑现控制张并保留后续控制力；
+ * - 敌方大概率收墩时，不要把仅剩的控制张大牌浪费在负分墩上；
+ * - 最后几墩优先脱手高风险牌，避免它们留在手里被迫收下。
+ */
+function endgameLineValue(
   card: number,
   obs: PlayObservation,
   knowledge: PublicKnowledge,
   threat: ThreatModel,
+  pWin: Record<Position, number>,
+  trickPoints: number,
+  candidateWins: boolean,
 ): number {
+  const lateGame = obs.ownHand.length <= 5 || knowledge.tricksRemaining <= 5;
+  if (!lateGame) return 0;
+
+  const remaining = obs.ownHand.filter((held) => held !== card);
+  const master = isSuitMaster(card, knowledge);
+  const masterCount = remaining.filter((held) => isSuitMaster(held, knowledge)).length;
+  const ownWin = pWin[obs.self] + pWin[obs.partner];
+  const oppWin = 1 - ownWin;
+  const breaking =
+    hasMode(threat, 'break-opp-allred') || hasMode(threat, 'break-opp-slam');
+  const riskyCard =
+    card === PIG ||
+    card === TRANSFORMER ||
+    (getSuit(card) === 2 && getRank(card) >= 9);
+
+  let value = 0;
+
+  if (ownWin >= 0.55) {
+    // 己方大概率拿回领出权。控制张在非负分墩上兑现最有价值。
+    if (master && trickPoints >= 0) value += 2.5 + masterCount * 0.9;
+    // 领出小牌试探、保留控制张，也是残局常见的“先手路线”。
+    if (!master && obs.currentTrick.plays.length === 0 && trickPoints <= 0) value += 1.2;
+  } else if (oppWin >= 0.55) {
+    // 敌方大概率收墩。不要把控制张浪费在负分墩上，除非正在破全红/满贯。
+    if (master && trickPoints < 0 && !breaking) value -= 2.5 + masterCount * 1.0;
+    // 跟牌阶段优先甩掉高风险牌，避免最后被迫自己收下。
+    if (riskyCard && trickPoints <= 0 && !breaking) value += 1.5;
+  }
+
+  // 最后 3 墩：控制张数量直接决定谁掌握下一墩。
+  if (knowledge.tricksRemaining <= 3) {
+    if (master && trickPoints > 0) value += 1.5 + masterCount * 0.8;
+    if (candidateWins && trickPoints < 0 && !breaking) value -= 2;
+  }
+
+  return value;
+}
+
+export interface CandidateBreakdown {
+  card: number;
+  total: number;
+  trickValue: number;
+  threatValue: number;
+  partnerValue: number;
+  contextValue: number;
+  retentionValue: number;
+  heartAValue: number;
+  safetyValue: number;
+  futureValue: number;
+  jitterValue: number;
+  /** 出这张牌后，自己赢下本墩的估计概率。 */
+  winProbability: number;
+  /** 出这张牌后，本队（自己 + 搭档）赢下本墩的估计概率。 */
+  ownTeamWinProbability: number;
+  opponentWinProbability: number;
+  trickPoints: number;
+  candidateWins: boolean;
+  isMaster: boolean;
+}
+
+/** 对一张候选牌做团队概率评分，并保留各维度明细供解释层使用。 */
+export function scoreCandidateBreakdown(
+  card: number,
+  obs: PlayObservation,
+  knowledge: PublicKnowledge,
+  threat: ThreatModel,
+): CandidateBreakdown {
   const play: CardPlay = { position: obs.self, card };
   const plays = [...obs.currentTrick.plays, play];
   const trickCards = plays.map((item) => item.card);
@@ -798,17 +885,74 @@ export function scoreCandidate(
     obs.currentTrick.plays.length === 0
       ? leadSafety(card, obs, knowledge, threat)
       : followSafety(card, obs, knowledge, threat, points, partnerWinning, opponentWinning);
-
-  return (
-    trickValue +
-    threatValue * 1.35 +
-    partnerValue +
-    contextValue +
-    retentionValue +
-    heartAValue +
-    safetyValue +
-    jitter(obs, card) * 0.01
+  const futureValue = endgameLineValue(
+    card,
+    obs,
+    knowledge,
+    threat,
+    pWin,
+    points,
+    candidateWins,
   );
+  const jitterValue = jitter(obs, card) * 0.01;
+
+  const ownTeamWinProbability = pWin[obs.self] + pWin[obs.partner];
+  return {
+    card,
+    total:
+      trickValue +
+      threatValue * 1.35 +
+      partnerValue +
+      contextValue +
+      retentionValue +
+      heartAValue +
+      safetyValue +
+      futureValue +
+      jitterValue,
+    trickValue,
+    threatValue,
+    partnerValue,
+    contextValue,
+    retentionValue,
+    heartAValue,
+    safetyValue,
+    futureValue,
+    jitterValue,
+    winProbability: pWin[obs.self],
+    ownTeamWinProbability,
+    opponentWinProbability: 1 - ownTeamWinProbability,
+    trickPoints: points,
+    candidateWins,
+    isMaster: isSuitMaster(card, knowledge),
+  };
+}
+
+/** 对一张候选牌做团队概率评分。分数越高越优先。 */
+export function scoreCandidate(
+  card: number,
+  obs: PlayObservation,
+  knowledge: PublicKnowledge,
+  threat: ThreatModel,
+): number {
+  return scoreCandidateBreakdown(card, obs, knowledge, threat).total;
+}
+
+/**
+ * 对全部合法牌评分并排序。排序保持稳定：同分时按合法牌原始顺序，
+ * 与旧版 choosePolicyPlay 的“仅严格大于才替换”完全一致。
+ */
+export function rankCandidates(
+  obs: PlayObservation,
+  knowledge: PublicKnowledge,
+  threat: ThreatModel,
+): CandidateBreakdown[] {
+  return obs.legalCards
+    .map((card, index) => ({
+      breakdown: scoreCandidateBreakdown(card, obs, knowledge, threat),
+      index,
+    }))
+    .sort((a, b) => b.breakdown.total - a.breakdown.total || a.index - b.index)
+    .map((item) => item.breakdown);
 }
 
 /** 概率启发式：对所有合法牌评分并选择最高者。 */
@@ -817,14 +961,5 @@ export function choosePolicyPlay(
   knowledge: PublicKnowledge,
   threat: ThreatModel,
 ): number {
-  let bestCard = obs.legalCards[0];
-  let bestScore = -Infinity;
-  for (const card of obs.legalCards) {
-    const score = scoreCandidate(card, obs, knowledge, threat);
-    if (score > bestScore) {
-      bestScore = score;
-      bestCard = card;
-    }
-  }
-  return bestCard;
+  return rankCandidates(obs, knowledge, threat)[0].card;
 }

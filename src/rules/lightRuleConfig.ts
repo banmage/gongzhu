@@ -1,7 +1,7 @@
 /**
  * 亮牌规则 V1.0 配置模型。
  *
- * 字段与 `rules/拱猪亮牌规则_V1.0.md` 第 10 节保持一致（snake_case），
+ * 字段与 `docs/拱猪亮牌规则_V1.0.md` 第 10 节保持一致（snake_case），
  * 便于管理员直接编辑 JSON、导入/导出与审计。
  */
 
@@ -39,6 +39,21 @@ export interface ModuleAConfig {
   targets: Record<LightFlag, Partial<LightKeyValues>>;
 }
 
+export interface ShapeBonusConfig {
+  enabled: boolean;
+  /** 红桃中达到该点数即视为“大红桃”（9=J）。 */
+  big_heart_min_rank: number;
+  /** 黑桃中达到该点数即视为“猪圈”（11=K，即 A/K）。 */
+  pig_pen_min_rank: number;
+  /** 其他花色不超过该张数即视为“单缺”（1=缺门或单张）。 */
+  short_suit_max_cards: number;
+  trans_two_clubs_floor: number;
+  trans_three_clubs_floor: number;
+  sheep_three_diamonds_floor: number;
+  pig_four_spades_floor: number;
+  hA_four_hearts_floor: number;
+}
+
 export interface ModuleBConfig {
   count_factor: {
     pig: Record<string, number>;
@@ -50,6 +65,7 @@ export interface ModuleBConfig {
   control: { mu1: number; mu2: number; mu3: number; eta: number; nu1: number; nu2: number };
   single_spade_pig_factor: number;
   zero_risk_trans_floor: number;
+  shape_bonus: ShapeBonusConfig;
   card_factor_range: [number, number];
 }
 
@@ -123,6 +139,17 @@ export const DEFAULT_LIGHT_RULE: LightRuleConfig = {
     control: { mu1: 0.8, mu2: 1.2, mu3: 0.4, eta: 3.0, nu1: 1.0, nu2: 2.0 },
     single_spade_pig_factor: 0.45,
     zero_risk_trans_floor: 1.3,
+    shape_bonus: {
+      enabled: true,
+      big_heart_min_rank: 9,
+      pig_pen_min_rank: 11,
+      short_suit_max_cards: 1,
+      trans_two_clubs_floor: 1.8,
+      trans_three_clubs_floor: 1.8,
+      sheep_three_diamonds_floor: 1.0,
+      pig_four_spades_floor: 2.2,
+      hA_four_hearts_floor: 3.0,
+    },
     card_factor_range: [0.05, 2.5],
   },
   module_c: {
@@ -290,6 +317,31 @@ export function normalizeLightRule(raw: unknown): LightRuleConfig {
   }
   numberAt(merged.module_b.single_spade_pig_factor, 'module_b.single_spade_pig_factor', { min: 0 });
   numberAt(merged.module_b.zero_risk_trans_floor, 'module_b.zero_risk_trans_floor', { min: 0 });
+  booleanAt(merged.module_b.shape_bonus.enabled, 'module_b.shape_bonus.enabled');
+  numberAt(merged.module_b.shape_bonus.big_heart_min_rank, 'module_b.shape_bonus.big_heart_min_rank', {
+    min: 0,
+    max: 12,
+    integer: true,
+  });
+  numberAt(merged.module_b.shape_bonus.pig_pen_min_rank, 'module_b.shape_bonus.pig_pen_min_rank', {
+    min: 0,
+    max: 12,
+    integer: true,
+  });
+  numberAt(merged.module_b.shape_bonus.short_suit_max_cards, 'module_b.shape_bonus.short_suit_max_cards', {
+    min: 0,
+    max: 3,
+    integer: true,
+  });
+  for (const key of [
+    'trans_two_clubs_floor',
+    'trans_three_clubs_floor',
+    'sheep_three_diamonds_floor',
+    'pig_four_spades_floor',
+    'hA_four_hearts_floor',
+  ] as const) {
+    numberAt(merged.module_b.shape_bonus[key], `module_b.shape_bonus.${key}`, { min: 0 });
+  }
   if (!Array.isArray(merged.module_b.card_factor_range) || merged.module_b.card_factor_range.length !== 2) {
     throw new Error('module_b.card_factor_range 必须是 [下限, 上限]');
   }

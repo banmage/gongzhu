@@ -3,6 +3,7 @@ import {
   PIG,
   SHEEP,
   TRANSFORMER,
+  cardLabel,
   getCard,
   type SuitIndex,
 } from '../models/card';
@@ -13,7 +14,7 @@ import {
   type SuitStatus,
   type Trick,
 } from '../models/game';
-import { choosePlay } from '../core/ai';
+import { choosePlay, recommendPlay } from '../core/ai';
 import {
   buildPlayObservation,
   type PlayObservation,
@@ -907,5 +908,29 @@ describe('出牌观察：信息边界', () => {
       handSizes: { S: 2, E: 13, N: 13, W: 13 },
     });
     expect(choosePlay(obs)).toBe(choosePlay(obs));
+  });
+
+  it('推荐解释返回合法牌、理由、公开推断与备选，且可强制解释指定合法牌', () => {
+    const ownHand = [getCard(1, 12), getCard(0, 0), getCard(2, 5)];
+    const obs = observation({
+      ownHand,
+      legalCards: [...ownHand],
+      handSizes: { S: 3, E: 13, N: 13, W: 13 },
+    });
+
+    const rec = recommendPlay(obs);
+    expect(obs.legalCards).toContain(rec.card);
+    expect(rec.title).toBe(`推荐出 ${cardLabel(rec.card)}`);
+    expect(rec.reasons.length).toBeGreaterThan(0);
+    expect(rec.inference.length).toBeGreaterThan(0);
+    expect(rec.breakdown.card).toBe(rec.card);
+    expect(rec.alternatives.every((item) => item.card !== rec.card)).toBe(true);
+    expect(rec.alternatives.length).toBeLessThanOrEqual(2);
+    expect(recommendPlay(obs)).toEqual(rec);
+
+    const forced = obs.legalCards[obs.legalCards.length - 1];
+    const forcedRec = recommendPlay(obs, { preferredCard: forced });
+    expect(forcedRec.card).toBe(forced);
+    expect(forcedRec.title).toBe(`推荐出 ${cardLabel(forced)}`);
   });
 });
